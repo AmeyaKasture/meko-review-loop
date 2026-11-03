@@ -1,8 +1,15 @@
 {
   "name": "review-loop-meko",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Optional Meko layer for review-loop: recall design decisions and known pitfalls before a loop, and (with consent) publish the outcome as a team learning.",
-  "author": { "name": "Ameya Kasture" },
+  "author": {
+    "name": "Ameya Kasture"
+  },
   "license": "Apache-2.0",
-  "keywords": ["meko", "review-loop", "memory", "code-review"]
+  "keywords": [
+    "meko",
+    "review-loop",
+    "memory",
+    "code-review"
+  ]
 }

@@ -21,7 +21,7 @@ report asks you about every judgement call instead of guessing.
 ```
 /plugin marketplace add ~/claude-review-loop        # or the git URL once pushed
 /plugin install review-loop@review-loop
-/plugin install review-loop-meko@review-loop        # optional, needs Meko connected
+/plugin install review-loop-meko@review-loop        # optional, needs Meko Cloud or offline Meko connected
 ```
 
 If you used the earlier standalone copy, remove it so the two do not overlap:
@@ -56,6 +56,7 @@ checks and limits. Command-line flags override it.
 | `plugins/review-loop/skills/review-loop/scripts/rl.py` | Deterministic state engine. |
 | `plugins/review-loop/skills/review-loop/scripts/fresh-session-review.sh` | Isolated gate review in a new process. |
 | `extensions/meko/` | Optional Meko layer: design-context recall and consent-gated publishing. |
+| `examples/agentk/` | Prompt overrides that bring review-loop's triage rules into AgentK. |
 | `tests/test_engine.sh` | Offline engine tests with no model calls. |
 | `docs/DESIGN.md` | Why each safeguard exists, and how this compares with other tools. |
 | `docs/REPORT.md` | Packaging and Meko evaluation report. |

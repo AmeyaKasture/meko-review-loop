@@ -39,7 +39,11 @@ below exists to stop you from rationalising real defects away.
 7. **Nits** may be rejected without a verifier ("style preference"), and never
    drive another round. Do not misuse `defer` for a finding you disagree with;
    `defer` means real but pre-existing or out of scope.
-8. **Two valid designs** (for example, "throw" versus "return an error value")
+8. **Findings flagged `[outside change]`** point at a file the change does not
+   touch. They are often pre-existing (`defer`), but not always: a change can
+   break an untouched caller. Accept them when the change causes or exposes
+   the defect.
+9. **Two valid designs** (for example, "throw" versus "return an error value")
    are an `ask` with options and your recommendation. Do not toggle between
    them across rounds.
 

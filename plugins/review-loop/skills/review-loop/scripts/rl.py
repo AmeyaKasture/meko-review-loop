@@ -503,6 +503,34 @@ def validate(doc):
     return errs
 
 
+def change_map(root, base, snapshot):
+    """{path: [(start, end), ...]} of added/changed line ranges in the snapshot (zero-context diff)."""
+    ranges, cur = {}, None
+    for line in sh(["git", "diff", "-U0", "--no-color", base, snapshot], cwd=root).splitlines():
+        if line.startswith("+++ "):
+            cur = None if line[4:] == "/dev/null" else line[6:] if line.startswith("+++ b/") else line[4:]
+            if cur is not None:
+                ranges.setdefault(cur, [])
+        elif line.startswith("--- a/"):
+            ranges.setdefault(line[6:], [])  # deleted or modified files count as changed
+        elif line.startswith("@@") and cur is not None:
+            m = re.search(r"\+(\d+)(?:,(\d+))?", line)
+            if m:
+                start, count = int(m.group(1)), int(m.group(2) or 1)
+                ranges[cur].append((start, start + max(count, 1) - 1))
+    return ranges
+
+
+def locate(f, cmap, slack=5):
+    """AgentK-style validation, as a flag rather than a filter: is the finding in the change?"""
+    if f["file"] not in cmap:
+        return "outside-change"
+    line = int(f.get("line") or 0)
+    if line == 0 or any(a - slack <= line <= b + slack for a, b in cmap[f["file"]]):
+        return "in-change"
+    return "near-change"
+
+
 def cmd_ingest(a):
     root = repo_root()
     st = load(root)
@@ -523,6 +551,7 @@ def cmd_ingest(a):
     if any(f["round"] == n and f["reviewer"] == name for f in st["findings"]):
         sys.exit(f"findings from {name} in round {n} were already ingested")
     prior = [f for f in st["findings"] if f["round"] < n]
+    cmap = change_map(root, st["base"], st["rounds"][str(n)]["snapshot"])
     seq = len(findings_in(st, n))
     added = []
     for f in doc["findings"]:
@@ -531,6 +560,7 @@ def cmd_ingest(a):
         f.update({"id": f"R{n}-{seq}", "round": n, "reviewer": name, "status": "untriaged",
                   "fingerprint": fingerprint(f), "triage_note": "", "duplicate_of": "",
                   "verifier": "", "recurrences": 0, "options": [], "recommendation": ""})
+        f["location"] = locate(f, cmap)
         pool = prior + [p for p in st["findings"] if p["round"] == n and p["reviewer"] != name]
         hints = [p["id"] for p in pool if p["fingerprint"] == f["fingerprint"]]
         hints += [p["id"] for p in pool if p["id"] not in hints and p["file"] == f["file"]
@@ -546,6 +576,7 @@ def cmd_ingest(a):
     print(f"{name}: verdict={doc['verdict']}, {len(added)} finding(s)")
     for f in sorted(added, key=lambda x: -SEV_RANK[x["severity"]]):
         dup = f"  ~dup? {','.join(f['possible_duplicates'])}" if f["possible_duplicates"] else ""
+        dup += "  [outside change]" if f["location"] == "outside-change" else ""
         print(f"  {f['id']:<7} {f['severity']:<7} {f['confidence']:<6} {f['category']:<15} "
               f"{f['file']}:{f['line']}  {f['title']}{dup}")
     for g in doc.get("intent_gaps", []):

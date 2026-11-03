@@ -28,16 +28,20 @@ Run from the repository root after `rl.py init`. Here `rl.py` means the
 engine whose absolute path is stored in `.review-loop/state.json` under
 `engine` (read it with `jq -r .engine .review-loop/state.json`).
 
-1. **Resolve identifiers** as the conventions file describes. If no Meko tools
-   are usable, print one line, `Meko context skipped: <reason>`, and stop.
+1. **Resolve identifiers** as the conventions file describes, including which
+   kind of Meko this is (Cloud or offline). If no Meko tools are usable, print
+   one line, `Meko context skipped: <reason>`, and stop.
 2. **Design decisions** (only when a design conversation id or a datapack is
    known). Query with the PR title plus the main touched subsystems:
    - if the PR body has `meko_conversation_id:<id>`, call `memory_search`
      with `run_id: <id>` and `limit: 8`;
    - also call `context_search` with `force_source: "conversation"`,
      `datapack_id`, and `limit: 5`, which reaches other members' design talks.
-3. **Team pitfalls** (only with a datapack): call `knowledgebase_search` with
-   a query such as `"review pitfalls defects regressions in <subsystems>"`,
+3. **Team pitfalls** (only with a datapack): if a `MEKO.md` row names a
+   datapack ending in `/gotchas`, call `knowledgebase_search` on it first with
+   the touched subsystems as the query, `limit: 5`, and keep each item's
+   `MG-<n>` id. Otherwise call `knowledgebase_search` on the resolved datapack
+   with a query such as `"review pitfalls defects regressions in <subsystems>"`,
    `limit: 5`. Then call `memory_search` for `"review-loop:<owner/repo>"`,
    `limit: 5`, to find summaries earlier loops published.
 4. **Distil, do not dump.** From the results keep at most:
