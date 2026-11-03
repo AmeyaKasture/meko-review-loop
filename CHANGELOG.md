@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 (2026-11-03)
+
+- Findings are marked `in-change`, `near-change`, or `outside-change` against the
+  reviewed diff (borrowed from AgentK's validation, as a flag rather than a
+  filter). The ingest listing shows `[outside change]`, and the rubric says when
+  to defer such findings.
+- `review-loop-meko` 0.2.0 supports offline Meko (`yugabyte/meko`): local
+  default-datapack fallback, `/gotchas` datapacks with `MG-<n>` provenance, and
+  an optional local KB upload of the report.
+- `examples/agentk/`: AgentK prompt overrides that require an independent
+  verifier before a blocker or major finding is declined.
+
 ## 0.2.0 (2026-11-03)
 
 - Packaged as a Claude Code plugin marketplace with two plugins: `review-loop`

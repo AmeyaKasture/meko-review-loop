@@ -35,6 +35,10 @@ Without a yes, stop.
    (`content_type: text/markdown`, `filename: review-loop-<repo>-<final12>.md`).
    Get base64 with `base64 -i <file> | tr -d '\n'`. Keep the returned hash.
    Refuse files over 5 MB. Never upload anything else from the repository.
+   On **offline Meko**, also offer to index the report for search with
+   `knowledgebase_upload_file` (`path`: the report's absolute path), so later
+   loops find it through `knowledgebase_search`. Ask first; it is a separate
+   yes, because every datapack member can read the knowledge base.
 4. **Summary memory:** one `memory_add`, with `agent_id` and
    `conversation_id` per the conventions (create a conversation only if none
    exists), and metadata `{"source": "review-loop", "marker": "<marker>",

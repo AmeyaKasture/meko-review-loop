@@ -62,6 +62,8 @@ J
 sed 's/"reviewer":"a"/"reviewer":"b"/' "$W/a.json" > "$W/b.json"
 "$RL" ingest "$W/a.json" >/dev/null
 expect "same-round duplicate hinted" "$("$RL" ingest "$W/b.json")" "~dup? R1-1"
+expect "in-change finding located" "$(jq -r '.findings[] | select(.id=="R1-1") | .location' .review-loop/state.json)" "in-change"
+expect "location recorded for guideline finding" "$(jq -r '.findings[] | select(.id=="R1-2") | .location' .review-loop/state.json)" "in-change"
 expect "major reject needs verifier" "$("$RL" triage R1-1 reject --note x 2>&1 || true)" "requires an independent verifier"
 "$RL" triage R1-1 accept >/dev/null; "$RL" triage R1-2 accept >/dev/null
 "$RL" triage R1-3 duplicate --duplicate-of R1-1 >/dev/null
@@ -88,9 +90,14 @@ cat > "$W/d.json" <<'J'
  {"severity":"minor","confidence":"low","category":"api-contract","file":"pkg/stats2.py","line":1,"title":"empty list behaviour undefined","claim":"raise or return None?","evidence":"x","failure_scenario":"median([])"}]}
 J
 "$RL" ingest "$W/d.json" >/dev/null
+echo '{"reviewer":"o","round":2,"verdict":"issues_found","findings":[{"severity":"minor","confidence":"medium","category":"correctness","file":"stats.py","line":2,"title":"mean of empty list","claim":"ZeroDivisionError","evidence":"len(xs)","failure_scenario":"mean([])"}]}' > "$W/o.json"
+"$RL" brief --mode full --name o >/dev/null
+expect "untouched file flagged outside change" "$("$RL" ingest "$W/o.json")" "[outside change]"
+"$RL" triage "$(jq -r '.findings[] | select(.reviewer=="o") | .id' .review-loop/state.json)" defer --note "pre-existing" >/dev/null
 echo '{"reviewer":"d2","round":2,"verdict":"issues_found","findings":[{"severity":"nit","confidence":"high","category":"style","file":"pkg/stats2.py","line":1,"title":"rename s","claim":"x","evidence":"x","failure_scenario":"x"}]}' > "$W/d2.json"
 "$RL" brief --mode full --name d2 >/dev/null; "$RL" ingest "$W/d2.json" >/dev/null
-expect "high-confidence nit rejectable without verifier" "$("$RL" triage R2-2 reject --note "style preference")" "R2-2 -> rejected"
+nit_id="$(jq -r '.findings[] | select(.reviewer=="d2") | .id' .review-loop/state.json)"
+expect "high-confidence nit rejectable without verifier" "$("$RL" triage "$nit_id" reject --note "style preference")" "rejected"
 "$RL" triage R2-1 ask --option "Raise ValueError (Recommended)" --option "Return None" --recommend A --note "intent silent" >/dev/null
 expect "gate requested" "$("$RL" status)" "NEXT: GATE"
 "$RL" snapshot --kind gate >/dev/null; "$RL" run-checks >/dev/null; "$RL" brief --mode gate --name gate >/dev/null

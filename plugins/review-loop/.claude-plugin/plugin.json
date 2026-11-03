@@ -1,8 +1,16 @@
 {
   "name": "review-loop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Fresh-context review, fix, repeat: independent read-only reviewers, anti-self-bias triage, a separate-process gate review, and a report that asks you about every judgement call.",
-  "author": { "name": "Ameya Kasture" },
+  "author": {
+    "name": "Ameya Kasture"
+  },
   "license": "Apache-2.0",
-  "keywords": ["code-review", "review-loop", "subagents", "quality", "pr"]
+  "keywords": [
+    "code-review",
+    "review-loop",
+    "subagents",
+    "quality",
+    "pr"
+  ]
 }

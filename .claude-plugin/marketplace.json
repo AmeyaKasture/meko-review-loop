@@ -1,9 +1,11 @@
 {
   "name": "review-loop",
-  "owner": { "name": "Ameya Kasture" },
+  "owner": {
+    "name": "Ameya Kasture"
+  },
   "metadata": {
     "description": "Fresh-context review-fix loops for Claude Code, with an optional Meko memory layer.",
-    "version": "0.2.0"
+    "version": "0.3.0"
   },
   "plugins": [
     {

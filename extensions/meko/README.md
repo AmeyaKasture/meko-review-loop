@@ -31,8 +31,14 @@ What it deliberately does not do:
 
 ## Install
 
-Meko must be connected first, either as the claude.ai connector or via
-`npx @yugabytedb/meko-mcp@latest --client claude-code`. Then:
+Meko must be connected first, in either of two ways:
+
+- **Meko Cloud** as the claude.ai connector, or with
+  `npx @yugabytedb/meko-mcp@latest --client claude-code`.
+- **Offline Meko** (`yugabyte/meko`): install it, then run
+  `meko agent connect claude`. Everything stays on your machine, with no quotas.
+
+Then:
 
 ```
 /plugin marketplace add ~/claude-review-loop

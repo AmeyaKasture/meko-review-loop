@@ -17,8 +17,16 @@
    "independent" reviewers. That is now blocked in the core plugin, whether or
    not you install the extension.
 4. **The Meko extension is untested against live Meko.** The Meko connector in
-   this environment is not authenticated, so I built it against Meko's
-   documented contract. Pilot it on one real PR before relying on it.
+   this environment is not authenticated, and running the offline Meko binary
+   was blocked by the auto-mode classifier. I built the extension against
+   Meko's documented contract. Pilot it on one real PR before relying on it.
+5. **Offline Meko changes the picture in one important way: AgentK.** Offline
+   Meko is a local, quota-free server with the same MCP tools as Meko Cloud,
+   so the extension supports it with small changes. Its AgentK extension,
+   however, already runs a mature local review loop before every PR. Do not
+   run both loops on the same change. Use AgentK's loop inside AgentK and
+   review-loop everywhere else, and bridge the two with the prompt overrides
+   in `examples/agentk/` (see the addendum below).
 
 ## What was delivered
 
@@ -119,13 +127,13 @@ these became generic features:
 
 | Check | Result |
 |---|---|
-| Offline engine tests | 35 of 35 pass |
+| Offline engine tests | 38 of 38 pass |
 | `claude plugin validate --strict` on the marketplace and both plugins | All pass |
 | End-to-end run on the standalone skill, with Sonnet orchestrating | Converged in 3 rounds. 5 findings fixed, 1 question. About $0.80. |
 | End-to-end run on the packaged plugin, with Sonnet orchestrating | Converged in 3 rounds. 6 findings fixed, 2 of them `REVIEW.md` rules. 1 question. About $0.71. |
 | Plugin reviewers block MCP | Confirmed: 0 MCP tools visible |
 | Gate isolation flags | Confirmed: 0 MCP tools, against 21 by default |
-| Live Meko calls | **Not tested.** The connector is unauthenticated here. |
+| Live Meko calls | **Not tested.** The Cloud connector is unauthenticated, and running the offline binary was blocked. |
 
 The packaged run exposed four defects, all now fixed and covered by tests:
 
@@ -143,6 +151,101 @@ The packaged run exposed four defects, all now fixed and covered by tests:
 4. The engine crashed outside a repository, and a missing test tool blocked
    convergence forever. Clear errors and a check probe now handle both.
 
+
+## Addendum: offline Meko and AgentK
+
+### What offline Meko is
+
+`yugabyte/meko` is the open-source, self-hosted Meko: one binary (`meko`, plus
+`meko-cli`) running a local server on `127.0.0.1:7778`, with SQLite and
+sqlite-vec storage under `~/.meko`. Embedding and reranking run locally, and a
+release ships its models. It serves the same MCP tools as Meko Cloud, with the
+same names and argument rules, and adds `knowledgebase_upload_file`, which
+uploads by local path. It has no quotas. `meko agent connect claude` registers it
+with Claude Code. `meko cloud_link` can route calls for Cloud datapacks to Meko
+Cloud while keeping local ones local. It also has its own extension system
+(`meko extension install`), whose main extension is AgentK.
+
+### What changes for review-loop
+
+| Topic | With Meko Cloud | With offline Meko | Change made |
+|---|---|---|---|
+| Cost of recall | Lifetime quota | Free | Kept the small search budget anyway, to protect the orchestrator's context |
+| Datapacks | Team IDs in `MEKO.md` | Local default datapack; Cloud IDs fail unless linked | Fall back to the default datapack on `datapack_access_denied`, and say so |
+| Publishing | Artifact plus memory | Same, plus an optional one-call KB upload of the report | Added as a separate, consent-gated step |
+| Independence risk | `context_search` can return the author's captured conversation | Same; it leaves out only the *caller's own* conversation | No change needed: reviewers already block `mcp__*` |
+| Memory extractor | Server-side | Runs your own `claude -p` on turns sent to Meko | No change needed: the gate sends no turns, because its hooks are off |
+| Pitfalls source | Any datapack | Any datapack | Prefer AgentK's `/gotchas` datapacks and keep their `MG-<n>` ids |
+
+### AgentK already has a review loop
+
+Before each PR, AgentK reviews the change locally with an algorithm ported from
+the cloud reviewer (Sagittarius 3.0 by default):
+
+- five specialist passes, each in a fresh subagent;
+- an independent scorer per finding, which keeps only findings that score 50
+  or more, or are confirmed;
+- a check that each finding sits in a changed hunk;
+- optional deep sweeps and re-review rounds, with your triage of findings
+  before the task fixes them;
+- Meko gotchas, review guides, and `git blame` history in the prompt, and a
+  `me_ak_review:` summary line in the PR.
+
+Compared with review-loop:
+
+| | AgentK review | review-loop |
+|---|---|---|
+| Where it runs | Inside AgentK sessions only | Any Claude Code session, and CI |
+| Reviewers can run code | No: Bash is removed | Yes: they run checks and reproduce defects |
+| False-positive filter | Independent scorer on every finding | Orchestrator triage, with a verifier on rejections |
+| Author declining a finding | Free: "fix or decline each" | A neutral verifier is required for major and blocker findings |
+| Later rounds | Told the earlier findings and outcomes | Fresh and unanchored; a ledger handles duplicates |
+| Deterministic checks | Run by the task, not a convergence gate | Lint and test results gate convergence |
+| Final gate | None beyond the last round | A separate-process review on the final tree |
+| UI and telemetry | Rich web UI, phone, usage stats | A Markdown report |
+
+Neither is strictly better. AgentK's scorer is a good idea that review-loop
+lacks, and review-loop's executed evidence and verifier-gated declines are what
+AgentK lacks.
+
+### What I built from this
+
+- **AgentK bridge** (`examples/agentk/.agent-k/stages/`): overrides of AgentK's
+  `code-review-fix` and `code-review-findings` prompts. They keep every AgentK
+  placeholder and add review-loop's rules: verify with a test or repro, never
+  fix by suppression, and decline a blocker or major finding only after an
+  independent verifier says NOT_REAL. This is the cheapest way to improve
+  AgentK's weakest step without forking it.
+- **Location check in the core plugin**, borrowed from AgentK as a flag rather
+  than a filter: each finding is marked `in-change`, `near-change`, or
+  `outside-change`. A finding in an untouched file is shown as
+  `[outside change]`, and the rubric says when to defer it.
+- **Offline Meko support** in the extension, as in the table above.
+
+### Not built, and why
+
+- **Packaging review-loop as a Meko extension** (`meko extension install`).
+  Meko extensions are long-running web apps served at `/ext/<name>/`, such as
+  AgentK and Presenter. review-loop is a skill that runs inside a Claude Code
+  session, so it would gain nothing from that packaging.
+- **A per-finding scorer** like AgentK's. It is worth trying later as a cheap
+  small-model pass before triage, if reports show too many false positives.
+
+### Testing offline Meko yourself
+
+I could not run the downloaded binary, so here is a sandboxed way to try it,
+with no service, Keychain entry, or change to your Claude Code setup:
+
+```
+mkdir -p ~/.meko-sandbox && printf '[web]\nenabled = false\n' > ~/.meko-sandbox/config.toml
+MEKO_HOME=~/.meko-sandbox MEKO_SECRETS=file MEKO_CALL_HOME=0 MEKO_UPDATE_AUTO=false \
+  <path-to>/meko serve --port 17778
+```
+
+Or install it normally with `curl -fsSL https://mekodata.ai/install.sh | sh`,
+then `meko agent connect claude`. With it running, `review-loop-meko` works
+unchanged, because the tool names are the same.
+
 ## Recommended next steps
 
 1. **Install the plugin** with the commands above, and remove the standalone copy.
@@ -150,16 +253,18 @@ The packaged run exposed four defects, all now fixed and covered by tests:
    `examples/meko-monorepo.review-loop.json` to the monorepo root, trimmed to
    the trees you touch, and run `/review-loop:review-loop <PR>`. The check
    probe will flag any linter that is not installed.
-3. **Authenticate Meko** with `/mcp`, install `review-loop-meko`, and repeat
-   the pilot. Compare how many judgement-call questions the report raises
+3. **Connect a Meko**, either offline (no quotas, nothing leaves your machine)
+   or Cloud via `/mcp`, then install `review-loop-meko` and repeat the pilot. Compare how many judgement-call questions the report raises
    with and without design context. That number is the extension's real
    value, so keep it only if it drops.
-4. **Push to GitHub when you are happy with it.** I did not create a remote,
+4. **If you use AgentK**, copy `examples/agentk/.agent-k` into the repository,
+   and let AgentK's own review run instead of review-loop on those tasks.
+5. **Push to GitHub when you are happy with it.** I did not create a remote,
    because publishing is your call. A private repository is the safe default:
    ```
    cd ~/claude-review-loop && gh repo create claude-review-loop --private --source . --push
    ```
-5. **Upstream later, if the pilot pays off.** `extensions/meko/` is
+6. **Upstream later, if the pilot pays off.** `extensions/meko/` is
    self-contained, so it can be proposed to `yugabyte/meko-skills` under
    `extensions/review-loop/`, next to the BMad extension.
 
@@ -168,4 +273,5 @@ The packaged run exposed four defects, all now fixed and covered by tests:
 - Meko docs in the monorepo: `meko/docs/content/docs/` (MCP server reference, memory, learnings, integrations)
 - Meko review policy: `~/voyager2/meko/REVIEW.md`, and datapack maps such as `amp/compute/MEKO.md`
 - Meko Claude Code plugin and BMad extension: https://github.com/yugabyte/meko-skills (v2.5.1)
+- Offline Meko and AgentK: https://github.com/yugabyte/meko (release meko-v0.20261103.4): `backend/docs/`, `extensions/agentk/docs/design/code-review.md`, `extensions/agentk/src/server/prompts.ts`
 - Claude Code docs: https://code.claude.com/docs/en/sub-agents, https://code.claude.com/docs/en/skills, https://code.claude.com/docs/en/hooks
