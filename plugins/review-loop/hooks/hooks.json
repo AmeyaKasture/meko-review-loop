@@ -1,0 +1,16 @@
+{
+  "description": "review-loop: keep the orchestrating session in the loop while a review loop is running (state-gated, session-gated, at most 3 nudges per round)",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/review-loop/scripts/rl.py\" guard",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}

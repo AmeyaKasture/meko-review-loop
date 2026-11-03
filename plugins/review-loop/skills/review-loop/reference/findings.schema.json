@@ -1,0 +1,154 @@
+{
+  "title": "review-loop reviewer output",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "reviewer",
+    "round",
+    "verdict",
+    "checks_run",
+    "findings"
+  ],
+  "properties": {
+    "reviewer": {
+      "type": "string",
+      "description": "Reviewer name given in the brief"
+    },
+    "round": {
+      "type": "integer"
+    },
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "clean",
+        "issues_found",
+        "could_not_review"
+      ],
+      "description": "clean = no finding at minor or above"
+    },
+    "summary": {
+      "type": "string",
+      "description": "Two or three sentences on overall quality and risk"
+    },
+    "checks_run": {
+      "type": "array",
+      "description": "Commands the reviewer actually executed and what happened",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "command",
+          "exit_code",
+          "outcome"
+        ],
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "exit_code": {
+            "type": "integer"
+          },
+          "outcome": {
+            "type": "string",
+            "description": "One line: passed, N failures, N warnings in changed files, etc."
+          }
+        }
+      }
+    },
+    "intent_gaps": {
+      "type": "array",
+      "description": "Stated requirements the change does not satisfy",
+      "items": {
+        "type": "string"
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "severity",
+          "confidence",
+          "category",
+          "file",
+          "line",
+          "title",
+          "claim",
+          "evidence",
+          "failure_scenario"
+        ],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": [
+              "blocker",
+              "major",
+              "minor",
+              "nit"
+            ]
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "correctness",
+              "edge-case",
+              "concurrency",
+              "security",
+              "error-handling",
+              "data-loss",
+              "performance",
+              "api-contract",
+              "test-gap",
+              "check-failure",
+              "check-warning",
+              "intent-gap",
+              "guideline",
+              "maintainability",
+              "style"
+            ]
+          },
+          "file": {
+            "type": "string",
+            "description": "Repo-relative path"
+          },
+          "line": {
+            "type": "integer",
+            "description": "1-indexed line in the reviewed snapshot; 0 if file-level"
+          },
+          "title": {
+            "type": "string",
+            "description": "<= 80 chars, the claim alone"
+          },
+          "claim": {
+            "type": "string",
+            "description": "What is wrong, stated precisely"
+          },
+          "evidence": {
+            "type": "string",
+            "description": "Quoted code, command output, or a reproduction that demonstrates it"
+          },
+          "failure_scenario": {
+            "type": "string",
+            "description": "Concrete input/state -> wrong output/crash"
+          },
+          "suggested_fix": {
+            "type": "string"
+          },
+          "reproduced": {
+            "type": "boolean",
+            "description": "True only if the reviewer executed something that demonstrated the defect"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "_comment": "Example for the yugabyte meko monorepo, derived from meko/DEVELOPMENT.md and REVIEW.md. Copy to the repo root as .review-loop.json and keep only the checks for the trees you touch. `rl.py run-checks --probe` flags any tool that is not installed.",
+  "checks": [
+    "cd meko/cli_app && golangci-lint run ./...",
+    "cd meko && ruff format --check .",
+    "cd meko/system_agent && mypy . && pycodestyle .",
+    "cd meko/api_server && go vet ./..."
+  ],
+  "max_rounds": 4,
+  "reviewer_model": "opus",
+  "gate_model": "opus",
+  "size_limits": { "commits": 20, "files": 100, "lines": 5000 }
+}
