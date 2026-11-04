@@ -38,6 +38,10 @@ them; follow the guide's review criteria, not its process steps.
 
 {{GUIDES}}
 
+## Team review skill
+
+{{REVIEW_SKILL}}
+
 ## Deterministic checks
 
 The orchestrator ran the project checks on this snapshot. Summary and logs:
@@ -84,8 +88,14 @@ The orchestrator ran the project checks on this snapshot. Summary and logs:
     a missing requirement, or a missing test for risky logic.
   - `minor`: real but low-impact issue, unlikely edge case.
   - `nit`: style or taste. Use sparingly.
+  - `question`: not a defect, but intent or necessity is unclear (a design or
+    scope doubt). The author answers it; it never blocks.
 - Do not pad the list. An empty findings array is a valid, valuable answer.
-- Do not ask questions; nobody will answer. State assumptions in `summary`.
+- Do not ask questions in your reply; nobody will answer it. Put design or
+  intent doubts in the findings as `question`, and state assumptions in `summary`.
+- Do not read anything under `~/.claude/review-loop/`, `.review-loop/state.json`,
+  or `.review-loop/report-*`, and do not query Meko (`meko`, `meko-cli`, port 7778). They hold the author's history and would bias you.
+  Your brief, the check logs, and your scratch directory are all you need there.
 
 ## Output
 

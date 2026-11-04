@@ -35,3 +35,7 @@ IF_UNCERTAIN_OPTIONS: <only for UNCERTAIN: two concrete ways the user could reso
 Use UNCERTAIN when the answer depends on intent or requirements the code
 cannot reveal (for example, whether a behaviour change is desired). That is a
 question for the human, not a coin toss.
+
+Never read `~/.claude/review-loop/` or the loop's state and reports, and never
+query Meko (`meko`, `meko-cli`, port 7778); judge the
+code, not the author's history.

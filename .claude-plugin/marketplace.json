@@ -4,19 +4,14 @@
     "name": "Ameya Kasture"
   },
   "metadata": {
-    "description": "Fresh-context review-fix loops for Claude Code, with an optional Meko memory layer.",
-    "version": "0.3.0"
+    "description": "Fresh-context review-fix loops for Claude Code, with PR-comment responses and private author lessons.",
+    "version": "0.4.0"
   },
   "plugins": [
     {
       "name": "review-loop",
       "source": "./plugins/review-loop",
-      "description": "Fresh-context review, fix, repeat until clean, with a separate-process gate and a decisions report."
-    },
-    {
-      "name": "review-loop-meko",
-      "source": "./extensions/meko",
-      "description": "Optional: recall design decisions and team pitfalls from Meko, and publish loop outcomes as learnings."
+      "description": "Fresh-context review, fix, repeat until clean; answer PR comments; save lessons for the author session only."
     }
   ]
 }

@@ -9,12 +9,16 @@ guard, and the final report.
 State lives in <repo>/.review-loop/ (excluded via .git/info/exclude).
 """
 import argparse
+import base64
 import datetime as dt
 import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
+import urllib.error
+import urllib.request
 import sys
 import tempfile
 
@@ -22,12 +26,24 @@ SKILL_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCHEMA_PATH = os.path.join(SKILL_DIR, "reference", "findings.schema.json")
 BRIEF_TEMPLATE = os.path.join(SKILL_DIR, "reference", "reviewer-brief.md")
 
-SEVERITIES = ["nit", "minor", "major", "blocker"]
+SEVERITIES = ["question", "nit", "minor", "major", "blocker"]  # question: needs author input, never blocks
 SEV_RANK = {s: i for i, s in enumerate(SEVERITIES)}
-TRIAGE_VERDICTS = ["accept", "reject", "defer", "ask", "duplicate"]
+TRIAGE_VERDICTS = ["accept", "reject", "doubtful", "defer", "ask", "duplicate"]  # ask = doubtful with options
 CONFIG_FILE = ".review-loop.json"
+RL_HOME = os.environ.get("REVIEW_LOOP_HOME") or os.path.join(os.path.expanduser("~"), ".claude", "review-loop")
+LEARNINGS_CONTEXT_CAP = 8000
+# Why did the author session miss a valid finding? Drives how the author guide is edited.
+MISS_CAUSES = {
+    "not-covered": "no guidance existed in the author guide or the repo rules",
+    "covered-unclear": "guidance existed but was vague, buried, or ambiguous",
+    "covered-ignored": "guidance was clear but was not applied while writing",
+    "context-gap": "needed knowledge of the code or system that was not looked up",
+    "spec-gap": "the requirement itself was unclear (not an instructions problem)",
+    "one-off": "a slip with no reusable lesson",
+}
+DEFAULT_DOUBT_OPTIONS = ["Keep the current design (no change)", "Change it as the reviewer suggests"]
 DEFAULT_SIZE_LIMITS = {"commits": 20, "files": 100, "lines": 5000}
-GUIDE_NAMES = ("REVIEW.md", "AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md")
+GUIDE_NAMES = ("REVIEW.md", "AGENTS.md", "CLAUDE.md", "BUGBOT.md", ".cursor/BUGBOT.md", "CONTRIBUTING.md")
 OPEN_STATES = {"untriaged", "accepted"}
 GUARD_MAX_BLOCKS = 3
 ARTIFACT_GLOBS = ["*__pycache__*", "*.pyc", "*.pyo", ".pytest_cache*", "*.egg-info*", "node_modules*",
@@ -128,14 +144,41 @@ def make_snapshot(root, label):
 
 
 # --------------------------------------------------------------- commands
-def load_config(root):
+def repo_slug(root):
+    remote = subprocess.run(["git", "remote", "get-url", "origin"], cwd=root, capture_output=True,
+                            text=True).stdout.strip()
+    return re.sub(r"^.*[:/]([^/]+/[^/]+?)(\.git)?$", r"\1", remote) if remote else os.path.basename(root)
+
+
+def config_path(root):
+    """Repo-level .review-loop.json wins; otherwise a private per-repo file under RL_HOME,
+    so a team repository needs no extra file."""
     p = os.path.join(root, CONFIG_FILE)
-    if not os.path.exists(p):
+    if os.path.exists(p):
+        return p
+    for name in (repo_slug(root).replace("/", "__"), os.path.basename(root)):
+        q = os.path.join(RL_HOME, "repos", name + ".json")
+        if os.path.exists(q):
+            return q
+    return None
+
+
+def load_config(root):
+    p = config_path(root)
+    if not p:
         return {}
     try:
         return json.load(open(p))
     except Exception as e:
-        sys.exit(f"{CONFIG_FILE} is not valid JSON: {e}")
+        sys.exit(f"{p} is not valid JSON: {e}")
+
+
+def review_skill_path(root, name):
+    for base in (os.path.join(root, ".claude", "skills"), os.path.join(os.path.expanduser("~"), ".claude", "skills")):
+        p = os.path.join(base, name, "SKILL.md")
+        if os.path.exists(p):
+            return p
+    return ""
 
 
 def change_size(root, base):
@@ -160,6 +203,9 @@ def cmd_init(a):
         if st["status"] in ("running", "awaiting-user"):
             sys.exit(f"a review-loop is already {st['status']} here (round {st['round']}). "
                      "Use `rl.py status`, or `rl.py init --force` to start over.")
+        if any(f.get("lesson") or f.get("miss") for f in st["findings"]) and not st.get("learnings_exported"):
+            sys.exit("the previous loop has lessons that were never saved. Run the exit skill "
+                     "(`rl.py export-learnings`), or `rl.py init --force` to discard them.")
     os.makedirs(state_dir(root), exist_ok=True)
     excl = sh(["git", "rev-parse", "--git-path", "info/exclude"], cwd=root)
     excl = excl if os.path.isabs(excl) else os.path.join(root, excl)
@@ -207,6 +253,9 @@ def cmd_init(a):
         "size": size,
         "size_limits": limits,
         "checks": checks,
+        "review_skill": a.review_skill or cfg.get("review_skill", ""),
+        "exit_instructions": cfg.get("exit_instructions", ""),
+        "pr": None,
         "round": 0,
         "rounds": {},
         "findings": [],
@@ -216,7 +265,11 @@ def cmd_init(a):
     save(root, st)
     print(json.dumps({"repo": root, "base": base, "checks": checks, "size": size, "over_limits": over,
                       "reviewer_model": st["reviewer_model"], "gate_model": st["gate_model"],
-                      "config": CONFIG_FILE if cfg else None, "state": state_path(root)}, indent=2))
+                      "review_skill": st["review_skill"],
+                      "config": config_path(root), "state": state_path(root)}, indent=2))
+    if st["review_skill"] and not review_skill_path(root, st["review_skill"]):
+        print(f"warning: review skill '{st['review_skill']}' not found under .claude/skills; "
+              "reviewers will fall back to the built-in lenses.")
     if over:
         print(f"SIZE GATE: change exceeds {', '.join(f'{k}>{limits[k]}' for k in over)}. "
               "Ask the user before starting the loop.")
@@ -400,11 +453,13 @@ def review_guides(root, base, snapshot):
         while d:
             dirs.add(d)
             d = os.path.dirname(d)
-    found = []
+    found, seen = [], set()
     for d in sorted(dirs, key=lambda x: (x.count("/"), x)):
         for g in GUIDE_NAMES:
             rel = os.path.join(d, g) if d else g
-            if os.path.isfile(os.path.join(root, rel)):
+            full = os.path.join(root, rel)
+            if os.path.isfile(full) and os.path.realpath(full) not in seen:  # symlinked copies count once
+                seen.add(os.path.realpath(full))
                 found.append(rel)
     return found
 
@@ -440,10 +495,7 @@ def cmd_brief(a):
     guides = review_guides(root, st["base"], r["snapshot"])
     rep["GUIDES"] = ("\n".join(f"- `{g}`" for g in guides) if guides else
                      "- (none found; apply general engineering judgement)")
-    pit = os.path.join(state_dir(root), "pitfalls.md")
-    if os.path.exists(pit):
-        rep["LENS"] += ("\n\n### Known pitfalls in this codebase (team history; verify, do not assume)\n\n"
-                        + open(pit).read().strip())
+    rep["REVIEW_SKILL"] = review_skill_section(root, st, a.mode, prev, r["snapshot"])
     text = open(BRIEF_TEMPLATE).read()
     for k, v in rep.items():
         text = text.replace("{{" + k + "}}", v)
@@ -454,6 +506,25 @@ def cmd_brief(a):
         r["reviewers"].append(a.name)
     save(root, st)
     print(json.dumps({"brief": bp, "output": out_json}, indent=2))
+
+
+def review_skill_section(root, st, mode, prev, snap):
+    name = st.get("review_skill")
+    path = review_skill_path(root, name) if name else ""
+    if not path:
+        return "(No team review skill is configured; use the lens and the guides above.)"
+    rng = f"{prev} {snap}" if mode == "delta" else f"{st['base']} {snap}"
+    return (f"This team reviews with the `{name}` skill. Invoke it with the Skill tool (or read `{path}` "
+            "if the Skill tool does not list it) and apply its method in full: the standards walk, the "
+            "active rule checklist and mechanical checks, and every review lens.\n\n"
+            "Adapt it to this loop:\n\n"
+            f"- Review the range `git diff {rng}`. Wherever the skill says `main`, `MERGE_BASE`, or `HEAD`, "
+            "use those two commits instead. The working tree matches the snapshot, including uncommitted files.\n"
+            "- Skip its change-summary step and its output and posting steps. Write the JSON described under "
+            "**Output** instead.\n"
+            "- Map its classes: CRITICAL -> `blocker`, WARNING -> `major`, SUGGESTION -> `minor`, "
+            "QUESTION -> `question`. Cite the rule file in `evidence` when a standard drove the finding.\n"
+            "- If a tool it names is not installed, skip that step and say so in `summary`.")
 
 
 FIELD_ALIASES = {"suggestion": "suggested_fix", "fix": "suggested_fix", "recommendation": "suggested_fix",
@@ -522,7 +593,7 @@ def change_map(root, base, snapshot):
 
 
 def locate(f, cmap, slack=5):
-    """AgentK-style validation, as a flag rather than a filter: is the finding in the change?"""
+    """Changed-hunk validation, as a flag rather than a filter: is the finding in the change?"""
     if f["file"] not in cmap:
         return "outside-change"
     line = int(f.get("line") or 0)
@@ -602,8 +673,10 @@ def cmd_triage(a):
                  ": rejecting it requires an independent "
                  "verifier verdict. Run the finding-verifier agent, then pass --verifier not-real "
                  "(or triage as accept/ask per its verdict).")
-    if v == "ask" and not a.option:
-        sys.exit("an `ask` needs at least two --option values (and ideally --recommend)")
+    if v in ("reject", "doubtful", "ask", "defer") and not a.note:
+        sys.exit(f"`{v}` needs --note: it is the reason the final report (and any PR reply) will show")
+    if v == "ask" and a.option and len(a.option) < 2:
+        sys.exit("give at least two --option values, or none to use the defaults")
     f["triage_note"] = a.note or ""
     if a.verifier:
         f["verifier"] = a.verifier
@@ -648,10 +721,12 @@ def cmd_triage(a):
         f["status"] = "rejected"
     elif v == "defer":
         f["status"] = "deferred"
-    elif v == "ask":
+    elif v in ("doubtful", "ask"):
+        # possible design difference: the code is kept as is and the user decides from the report
         f["status"] = "question"
-        f["options"] = a.option
-        f["recommendation"] = a.recommend or ""
+        f["doubt"] = True
+        f["options"] = a.option or list(DEFAULT_DOUBT_OPTIONS)
+        f["recommendation"] = a.recommend or ("A" if not a.option else "")
     save(root, st)
     if v != "duplicate":
         print(f"{f['id']} -> {f['status']}")
@@ -696,8 +771,42 @@ def cmd_fixed(a):
         f["fixed_in_round"] = st["round"]
         if a.note:
             f["fix_note"] = a.note
+        if a.lesson:
+            f["lesson"] = a.lesson
+        if a.cause:
+            f["miss"] = {"cause": a.cause, "why": a.why or "", "guide_ref": a.guide_ref or ""}
+        st["learnings_exported"] = False
     save(root, st)
-    print(f"marked fixed: {' '.join(a.ids)}")
+    print(f"marked fixed: {' '.join(a.ids)}" + ("" if a.cause else
+          "  (no --cause: record why you missed it with `rl.py miss ID --cause ... --why ...` while you remember)"))
+
+
+def cmd_miss(a):
+    """Record the author session's own diagnosis of why it missed a finding."""
+    root = repo_root()
+    st = load(root)
+    f = find(st, a.id)
+    if f["status"] not in ("fixed", "answered"):
+        sys.exit(f"{a.id} is {f['status']}; miss analysis applies to fixed findings and answered design questions")
+    if a.cause in ("covered-unclear", "covered-ignored") and not a.guide_ref:
+        sys.exit(f"--cause {a.cause} needs --guide-ref: quote the section or rule that already covered it")
+    f["miss"] = {"cause": a.cause, "why": a.why, "guide_ref": a.guide_ref or ""}
+    st["learnings_exported"] = False
+    save(root, st)
+    print(f"{a.id}: missed because {a.cause}")
+
+
+def cmd_lesson(a):
+    """Attach a reusable lesson (pattern or design choice, not the instance) to a finding."""
+    root = repo_root()
+    st = load(root)
+    f = find(st, a.id)
+    if f["status"] not in ("fixed", "answered", "rejected", "question"):
+        sys.exit(f"{a.id} is {f['status']}; lessons belong to fixed, answered, rejected, or doubtful findings")
+    f["lesson"] = a.text
+    st["learnings_exported"] = False
+    save(root, st)
+    print(f"{a.id}: lesson recorded")
 
 
 def decide(st):
@@ -723,6 +832,16 @@ def decide(st):
     if r.get("checks_broken"):
         return "FIX_CHECKS", ("These checks cannot run here: " + ", ".join(r["checks_broken"]) +
                               ". Replace them (`rl.py set-checks`), then `rl.py run-checks` again.")
+    if r["kind"] == "pr":
+        # every accepted PR comment is applied, whatever its severity, and then independently reviewed
+        todo = [f["id"] for f in cur if f["status"] == "accepted"]
+        if todo:
+            return "FIX", "Apply accepted PR comments: " + ", ".join(todo)
+        if any(f["status"] == "fixed" for f in cur):
+            if n >= st["max_rounds"]:
+                return "CAPPED", "PR comment fixes were applied but the round budget is spent; they are unreviewed."
+            return "NEXT_ROUND", "PR comment fixes need an independent review round (full + delta), then the gate."
+        return "CONVERGED", "No code changed for the PR comments." + pr_tip(st)
     if blocking_unfixed:
         return "FIX", "Fix accepted blocking findings: " + ", ".join(blocking_unfixed)
     clean = not blocking_this_round and not checks_failed
@@ -744,7 +863,14 @@ def decide(st):
         if n >= st["max_rounds"] + 1:  # allow one gate beyond max
             return "CAPPED", tip + " Gate budget exhausted."
         return "GATE", tip + " Run the fresh-session gate review on the same tree."
-    return "CONVERGED", tip
+    return "CONVERGED", tip + pr_tip(st)
+
+
+def pr_tip(st):
+    if not st.get("pr"):
+        return ""
+    return (" Draft the PR replies (`rl.py pr-replies`), let the user push, and post only after they confirm "
+            "(`rl.py pr-replies --post`).")
 
 
 def cmd_status(a):
@@ -851,14 +977,15 @@ def cmd_report(a):
     L.append(f"- Outcome: {why}\n")
     answered = by("answered")
     qs = by("question")
-    L.append("## Decisions needed from you\n")
+    L.append("## Possible design differences (code kept as is; your call)\n")
     if not qs:
         L.append("None.\n")
     for i, f in enumerate(qs, 1):
-        L.append(f"### Q{i}. {f['title']}  ({f['id']}, {f['severity']})\n")
+        src = f" - PR comment by @{f['source']['author']}" if f.get("source") else ""
+        L.append(f"### D{i}. {f['title']}  ({f['id']}, {f['severity']}{src})\n")
         L.append(f"`{f['file']}:{f['line']}`. {f['claim']}\n")
         if f.get("triage_note"):
-            L.append(f"Why this is a judgement call: {f['triage_note']}\n")
+            L.append(f"Why this may be a design difference: {f['triage_note']}\n")
         for j, o in enumerate(f["options"]):
             o = re.sub(r"\s*\((?:recommended)\)\s*", " ", o, flags=re.I).strip()
             mark = " **(recommended)**" if f.get("recommendation") and f["recommendation"].strip().upper()[:1] == chr(65 + j) else ""
@@ -869,11 +996,23 @@ def cmd_report(a):
         L.append("\n".join(f"- {f['id']} {f['title']}: **{f['answer']['choice']}** {f['answer']['text']}"
                            + (f" ({f['answer']['note']})" if f['answer'].get('note') else "") for f in answered))
         L.append("")
+    L.append("## Valid: fixed\n")
+    L.append("\n".join(f"- {f['id']} [{f['severity']}] `{f['file']}:{f['line']}` {f['title']}"
+                       + (f" - {f['fix_note']}" if f.get('fix_note') else "")
+                       + (f"\n  - Missed because: {f['miss']['cause']} - {f['miss']['why']}" if f.get('miss') else "")
+                       + (f"\n  - Lesson: {f['lesson']}" if f.get('lesson') else "") for f in by("fixed")) or "None.")
+    L.append("\n## Not valid: code kept as is (with reason)\n")
+    L.append("\n".join(f"- {f['id']} [{f['severity']}] `{f['file']}:{f['line']}` {f['title']}: {f['triage_note']}"
+                       + (f" (verifier: {f['verifier']})" if f['verifier'] else "")
+                       + (f" - PR comment by @{f['source']['author']}" if f.get('source') else "")
+                       for f in by("rejected")) or "None.")
     minors = [f for f in by("accepted") if not is_blocking(st, f)]
-    L.append("## Optional fixes (accepted, below threshold, not applied)\n")
+    L.append("\n## Optional fixes (valid, below threshold, not applied)\n")
     L.append("\n".join(f"- {f['id']} `{f['file']}:{f['line']}` {f['title']}" for f in minors) or "None.")
+    L.append("\n## Deferred (pre-existing or out of scope)\n")
+    L.append("\n".join(f"- {f['id']} `{f['file']}:{f['line']}` {f['title']}: {f['triage_note']}" for f in by("deferred")) or "None.")
     L.append("\n## Rounds\n")
-    L.append("| Round | Kind | Reviewers | Checks | Found | Accepted+fixed | Rejected | Questions |")
+    L.append("| Round | Kind | Reviewers | Checks | Found | Fixed | Not valid | Doubtful |")
     L.append("|---|---|---|---|---|---|---|---|")
     for k in sorted(st["rounds"], key=int):
         r = st["rounds"][k]
@@ -881,15 +1020,7 @@ def cmd_report(a):
         ck = {True: "pass", False: "FAIL", None: "n/a"}[r.get("checks_ok")]
         L.append(f"| {k} | {r['kind']} | {', '.join(r['reviewers'])} | {ck} | {len(rf)} | "
                  f"{sum(f['status'] in ('fixed','accepted') for f in rf)} | "
-                 f"{sum(f['status']=='rejected' for f in rf)} | {sum(f['status']=='question' for f in rf)} |")
-    L.append("\n## Fixed\n")
-    L.append("\n".join(f"- {f['id']} [{f['severity']}] `{f['file']}:{f['line']}` {f['title']}"
-                       + (f" - {f['fix_note']}" if f.get('fix_note') else "") for f in by("fixed")) or "None.")
-    L.append("\n## Rejected (with reason)\n")
-    L.append("\n".join(f"- {f['id']} [{f['severity']}] {f['title']}: {f['triage_note']}"
-                       + (f" (verifier: {f['verifier']})" if f['verifier'] else "") for f in by("rejected")) or "None.")
-    L.append("\n## Deferred (pre-existing or out of scope)\n")
-    L.append("\n".join(f"- {f['id']} `{f['file']}:{f['line']}` {f['title']}: {f['triage_note']}" for f in by("deferred")) or "None.")
+                 f"{sum(f['status']=='rejected' for f in rf)} | {sum(f['status'] in ('question','answered') for f in rf)} |")
     if st.get("notes"):
         L.append("\n## Process notes\n")
         L.append("\n".join(f"- {n}" for n in st["notes"]))
@@ -901,36 +1032,450 @@ def cmd_report(a):
     print(out)
 
 
+def guide_file(root, suffix=".md"):
+    """The author guide: a semantic, topic-organised instructions doc for the author session."""
+    os.makedirs(os.path.join(RL_HOME, "guides"), exist_ok=True)
+    return os.path.join(RL_HOME, "guides", repo_slug(root).replace("/", "__") + suffix)
+
+
+def exit_instructions_path(root, st):
+    p = st.get("exit_instructions") or load_config(root).get("exit_instructions") or os.path.join(RL_HOME, "EXIT.md")
+    return os.path.expanduser(p)
+
+
 def cmd_export_learnings(a):
-    """Deterministic, compact summary of what this loop taught us, for publishing to a
-    team memory (e.g. the Meko extension). Contains no code and no conversation text."""
+    """Deterministic summary of what this loop taught the author session, for the exit skill.
+    It holds no code and no conversation text, and it is never shown to reviewers."""
     root = repo_root()
     st = load(root)
-    remote = subprocess.run(["git", "remote", "get-url", "origin"], cwd=root, capture_output=True, text=True).stdout.strip()
-    slug = re.sub(r"^.*[:/]([^/]+/[^/]+?)(\.git)?$", r"\1", remote) if remote else os.path.basename(root)
+    slug = repo_slug(root)
     final = st["rounds"].get(str(st["round"]), {}).get("snapshot", "")
     F = st["findings"]
     cats = {}
     for f in F:
         if f["status"] == "fixed":
             cats[f["category"]] = cats.get(f["category"], 0) + 1
+    src = lambda f: ({"pr_comment_by": f["source"]["author"]} if f.get("source") else {})
     out = {
         "marker": f"review-loop:{slug}:{st['base'][:12]}:{final[:12]}",
-        "repo": slug, "target": st["target"], "base": st["base"], "final_snapshot": final,
-        "rounds": st["round"], "outcome": st["status"],
+        "repo": slug, "target": st["target"], "pr": (st.get("pr") or {}).get("number"),
+        "base": st["base"], "final_snapshot": final, "rounds": st["round"], "outcome": st["status"],
         "defect_classes_fixed": cats,
-        "fixed": [{"severity": f["severity"], "category": f["category"], "file": f["file"], "title": f["title"]}
+        "fixed": [dict({"severity": f["severity"], "category": f["category"], "file": f["file"],
+                        "title": f["title"], "claim": f["claim"], "fix": f.get("fix_note", ""),
+                        "miss": f.get("miss"), "lesson": f.get("lesson", "")}, **src(f))
                   for f in F if f["status"] == "fixed"],
-        "verified_false_positives": [{"title": f["title"], "file": f["file"], "why_not_real": f["triage_note"]}
-                                     for f in F if f["status"] == "rejected" and f.get("verifier") == "not-real"],
-        "user_decisions": [{"title": f["title"], "decision": f["answer"]["text"], "note": f["answer"].get("note", "")}
-                           for f in F if f["status"] == "answered"],
-        "open_questions": [f["title"] for f in F if f["status"] == "question"],
+        "not_valid": [dict({"title": f["title"], "file": f["file"], "why_not_valid": f["triage_note"],
+                            "verifier": f.get("verifier", ""), "lesson": f.get("lesson", "")}, **src(f))
+                      for f in F if f["status"] == "rejected"],
+        "design_differences": [dict({"title": f["title"], "file": f["file"], "note": f["triage_note"],
+                                     "decision": (f.get("answer") or {}).get("text", "open"),
+                                     "decision_note": (f.get("answer") or {}).get("note", ""),
+                                     "miss": f.get("miss"), "lesson": f.get("lesson", "")}, **src(f))
+                               for f in F if f["status"] in ("question", "answered")],
+        "miss_causes": MISS_CAUSES,
+        "missing_miss_analysis": [f["id"] for f in F if f["status"] == "fixed" and not f.get("miss")],
+        "guide_file": guide_file(root),
+        "guide_store": guide_store(),
+        "guide_history": guide_file(root, ".history.md"),
+        "global_guide": os.path.join(RL_HOME, "guides", "_global.md"),
+        "exit_instructions": exit_instructions_path(root, st),
     }
     p = os.path.join(state_dir(root), "learnings.json")
     with open(p, "w") as fh:
         json.dump(out, fh, indent=2)
+    st["learnings_exported"] = True
+    save(root, st)
     print(p)
+
+
+# ------------------------------------------------------------ PR comments
+PR_QUERY = """query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){pullRequest(number:$n){
+ number url author{login}
+ reviewThreads(first:100){nodes{id isResolved isOutdated path line originalLine
+   comments(first:30){nodes{databaseId author{login} body url}}}}
+ reviews(first:100){nodes{databaseId author{login} body state url}}
+ comments(first:100){nodes{databaseId author{login} body url}}}}}"""
+SEVERITY_WORDS = {"critical": "blocker", "blocker": "blocker", "warning": "major", "major": "major",
+                  "high": "major", "suggestion": "minor", "minor": "minor", "medium": "minor",
+                  "nit": "nit", "low": "nit", "question": "question"}
+LEAD_TAG = re.compile(r"^\s*(?:\[AI\]\s*)?(?:\[(\w+)\]|\*\*(\w+)\*\*\s*[-\u2014:])", re.I)
+
+
+def comment_severity(body, inline):
+    """Severity from the comment's own tag: `[AI][Warning] ...`, `[CRITICAL]`, `**minor** - ...`,
+    or "High Severity". Untagged: a question stays a question; an inline comment is a change request."""
+    m = LEAD_TAG.match(body)
+    word = (m.group(1) or m.group(2)).lower() if m else ""
+    if word in SEVERITY_WORDS:
+        return SEVERITY_WORDS[word]
+    m = re.search(r"\b(critical|high|medium|low) severity\b", body, re.I)
+    if m:
+        return SEVERITY_WORDS[m.group(1).lower()]
+    if re.search(r"\?\s*$", body.strip().splitlines()[0] if body.strip() else ""):
+        return "question"
+    return "major" if inline else "question"
+
+
+def first_line(body):
+    for ln in body.splitlines():
+        ln = re.sub(r"\[\w+\]\s*", "", ln)                                   # [AI][Warning]
+        ln = re.sub(r"^\s*\*\*\w+\*\*\s*[-\u2014:]\s*", "", ln)              # **minor** -
+        ln = re.sub(r"^\s*`[^`]*`\s*[-\u2014]\s*", "", ln)                     # `file:line` -
+        ln = re.sub(r"^[#>\s-]+", "", ln).replace("**", "").strip()
+        if ln:
+            return ln[:80]
+    return "(empty comment)"
+
+
+def cmd_reopen(a):
+    """After the user pushed: start answering PR comments in the same orchestrator thread."""
+    root = repo_root()
+    st = load(root)
+    if st["status"] == "running":
+        sys.exit("the loop is still running; finish it first")
+    st["status"] = "running"
+    st["pr"] = dict(st.get("pr") or {}, number=a.pr, seen=(st.get("pr") or {}).get("seen", []),
+                    posted=(st.get("pr") or {}).get("posted", []))
+    st["max_rounds"] = st["round"] + 1 + a.extra_rounds
+    st["notes"].append(f"reopened for PR #{a.pr} comments at round {st['round']}")
+    save(root, st)
+    print(f"reopened for PR #{a.pr}; next: `rl.py snapshot --kind pr`, then `rl.py pr-ingest`")
+
+
+def cmd_pr_ingest(a):
+    root = repo_root()
+    st = load(root)
+    n = need_round(st)
+    r = st["rounds"][str(n)]
+    if r["kind"] != "pr" or not st.get("pr"):
+        sys.exit("run `rl.py reopen --pr N` and `rl.py snapshot --kind pr` first")
+    if a.from_file:
+        data = json.load(open(a.from_file))
+    else:
+        owner, _, name = repo_slug(root).partition("/")
+        out = sh(["gh", "api", "graphql", "-f", f"query={PR_QUERY}", "-F", f"o={owner}", "-F", f"r={name}",
+                  "-F", f"n={st['pr']['number']}"], cwd=root)
+        data = json.loads(out)
+    pr = data["data"]["repository"]["pullRequest"]
+    me = (pr.get("author") or {}).get("login", "")
+    seen = set(st["pr"]["seen"])
+    cmap = change_map(root, st["base"], r["snapshot"])
+    seq = len(findings_in(st, n))
+    added = []
+
+    def add(kind, cid, author, body, url, path="", line=0, thread=None, thread_id=""):
+        nonlocal seq
+        seq += 1
+        f = {"severity": comment_severity(body, kind == "inline"), "confidence": "high",
+             "category": "review-comment", "file": path or "", "line": int(line or 0),
+             "title": first_line(body), "claim": body.strip(), "evidence": url,
+             "failure_scenario": "(PR review comment)", "reproduced": False}
+        f.update({"id": f"R{n}-{seq}", "round": n, "reviewer": "github", "status": "untriaged",
+                  "fingerprint": fingerprint(f), "triage_note": "", "duplicate_of": "", "verifier": "",
+                  "recurrences": 0, "options": [], "recommendation": "", "possible_duplicates": [],
+                  "source": {"kind": kind, "comment_id": cid, "author": author, "url": url,
+                             "thread": thread or [], "thread_id": thread_id}})
+        f["location"] = locate(f, cmap) if path else "outside-change"
+        st["findings"].append(f)
+        seen.add(cid)
+        added.append(f)
+
+    for t in pr["reviewThreads"]["nodes"]:
+        cs = t["comments"]["nodes"]
+        if t["isResolved"] or not cs:
+            continue
+        head = cs[0]
+        who = (head.get("author") or {}).get("login", "")
+        if head["databaseId"] in seen or who == me:
+            continue
+        rest = [f"@{(c.get('author') or {}).get('login','')}: {c['body']}" for c in cs[1:]]
+        add("inline", head["databaseId"], who, head["body"], head["url"], t["path"],
+            t.get("line") or t.get("originalLine") or 0, rest, t["id"])
+    for rv in pr["reviews"]["nodes"]:
+        who = (rv.get("author") or {}).get("login", "")
+        if rv["body"].strip() and rv["databaseId"] not in seen and who != me:
+            add("review", rv["databaseId"], who, rv["body"], rv["url"])
+    for c in pr["comments"]["nodes"]:
+        who = (c.get("author") or {}).get("login", "")
+        if c["body"].strip() and c["databaseId"] not in seen and who != me:
+            add("comment", c["databaseId"], who, c["body"], c["url"])
+    st["pr"]["seen"] = sorted(seen)
+    if "github" not in r["reviewers"]:
+        r["reviewers"].append("github")
+    r.setdefault("verdicts", {})["github"] = {"verdict": "issues_found" if added else "clean",
+                                             "summary": f"{len(added)} open PR comment(s)", "checks_run": []}
+    save(root, st)
+    print(f"PR #{st['pr']['number']}: {len(added)} open comment(s) ingested (resolved threads and your own skipped)")
+    for f in added:
+        print(f"  {f['id']:<7} {f['severity']:<8} @{f['source']['author']:<16} {f['file'] or '(PR-level)'}:{f['line']}  {f['title']}")
+
+
+def reply_text(st, f, prefix):
+    s = f["status"]
+    if s == "fixed":
+        body = f"Fixed: {f.get('fix_note') or 'applied as suggested'}."
+    elif s == "rejected":
+        body = f"Keeping this as is: {f['triage_note']}"
+    elif s == "question":
+        opts = " / ".join(f"({chr(65+i)}) {o}" for i, o in enumerate(f["options"]))
+        body = (f"Possible design difference: {f['triage_note']} Options: {opts}. "
+                "Keeping the current design until we agree.")
+    elif s == "answered":
+        body = f"Decided: {f['answer']['text']}." + (f" {f['answer']['note']}" if f["answer"].get("note") else "")
+    elif s == "deferred":
+        body = f"Out of scope for this PR: {f['triage_note']}"
+    else:
+        return ""
+    return prefix + body
+
+
+def cmd_pr_replies(a):
+    root = repo_root()
+    st = load(root)
+    if not st.get("pr"):
+        sys.exit("no PR attached; run `rl.py reopen --pr N` first")
+    prefix = load_config(root).get("reply_prefix", "[AI] ")
+    posted = set(st["pr"].get("posted", []))
+    todo = []
+    for f in st["findings"]:
+        if f.get("source") and f["source"]["comment_id"] not in posted:
+            txt = reply_text(st, f, prefix)
+            if txt:
+                todo.append((f, txt))
+    md = [f"# Draft replies for PR #{st['pr']['number']}\n"]
+    for f, txt in todo:
+        md.append(f"## {f['id']} @{f['source']['author']} ({f['status']})\n\n{f['source']['url']}\n\n> {f['title']}\n\n{txt}\n")
+    out = os.path.join(state_dir(root), "pr-replies.md")
+    with open(out, "w") as fh:
+        fh.write("\n".join(md))
+    if not a.post:
+        print(f"{len(todo)} draft repl(ies): {out}\nNothing was posted. Post only after the user pushed and confirmed.")
+        return
+    dirty = [l for l in sh(["git", "status", "--porcelain"], cwd=root).splitlines() if ".review-loop" not in l]
+    ahead = subprocess.run(["git", "rev-list", "--count", "@{u}..HEAD"], cwd=root, capture_output=True, text=True)
+    if dirty or ahead.returncode != 0 or ahead.stdout.strip() != "0":
+        sys.exit("refusing to post: the fixes are not pushed yet (uncommitted changes, or HEAD ahead of / "
+                 "without an upstream). Ask the user to commit and push first.")
+    slug = repo_slug(root)
+    for f, txt in todo:
+        src = f["source"]
+        if src["kind"] == "inline":
+            sh(["gh", "api", "-X", "POST", f"repos/{slug}/pulls/{st['pr']['number']}/comments/{src['comment_id']}/replies",
+                "-f", f"body={txt}"], cwd=root)
+        else:
+            sh(["gh", "pr", "comment", str(st["pr"]["number"]), "--body", f"> {f['title']}\n\n{txt}"], cwd=root)
+        posted.add(src["comment_id"])
+        st["pr"]["posted"] = sorted(posted)
+        save(root, st)
+        print(f"posted reply to {f['id']} (@{src['author']})")
+
+
+# ------------------------------------------------------- author guide store
+# The guide's home is a local Meko (offline, http://127.0.0.1:7778) when available, with the
+# local file as cache and fallback. Settings: RL_HOME/settings.json {"guide_store": "auto|meko|file"}.
+MEKO_URL = os.environ.get("MEKO_URL", "http://127.0.0.1:7778")
+GUIDE_ARTIFACT = "author-guide.md"
+MEKO_AGENT = "review-loop"
+
+
+class MekoError(Exception):
+    pass
+
+
+def rl_settings():
+    p = os.path.join(RL_HOME, "settings.json")
+    try:
+        return json.load(open(p)) if os.path.exists(p) else {}
+    except Exception:
+        return {}
+
+
+def guide_store():
+    return os.environ.get("REVIEW_LOOP_GUIDE_STORE") or rl_settings().get("guide_store", "auto")
+
+
+def meko_token():
+    if os.environ.get("MEKO_TOKEN"):
+        return os.environ["MEKO_TOKEN"]
+    exe = shutil.which("meko") or os.path.expanduser("~/.local/bin/meko")
+    if not os.path.exists(exe):
+        raise MekoError("meko is not installed")
+    r = subprocess.run([exe, "token"], capture_output=True, text=True, timeout=5)
+    if r.returncode or not r.stdout.strip():
+        raise MekoError("could not read the Meko token (`meko token`)")
+    return r.stdout.strip()
+
+
+def meko_call(tok, name, args, timeout=20):
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                       "params": {"name": name, "arguments": args}}).encode()
+    req = urllib.request.Request(MEKO_URL + "/mcp", data=body, headers={
+        "Authorization": "Bearer " + tok, "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream"})
+    try:
+        out = json.loads(urllib.request.urlopen(req, timeout=timeout).read())
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        raise MekoError(f"{name}: Meko is not reachable at {MEKO_URL} ({e})")
+    if "error" in out:
+        raise MekoError(f"{name}: {out['error']}")
+    text = out["result"]["content"][0]["text"]
+    try:
+        val = json.loads(text)
+    except ValueError:
+        raise MekoError(f"{name}: {text[:200]}")
+    if isinstance(val, dict) and val.get("error"):
+        raise MekoError(f"{name}: {val['error']} {val.get('detail', '')}".strip())
+    return val
+
+
+def meko_rest(tok, path, timeout=5):
+    req = urllib.request.Request(MEKO_URL + "/api/v1" + path, headers={"Authorization": "Bearer " + tok})
+    try:
+        return json.loads(urllib.request.urlopen(req, timeout=timeout).read())["data"]
+    except (urllib.error.URLError, OSError, ValueError, KeyError) as e:
+        raise MekoError(f"GET {path}: {e}")
+
+
+def meko_datapack_name(slug):
+    return ("review-loop guide " + slug)[:60]
+
+
+def meko_datapack(tok, slug, create):
+    name = meko_datapack_name(slug)
+    for d in meko_rest(tok, "/datapacks"):
+        if d.get("datapack_name") == name:
+            return d["datapack_id"]
+    if not create:
+        return None
+    boot = meko_call(tok, "conversation_create", {"agent_id": MEKO_AGENT, "session_id": "review-loop-setup",
+                                                  "title": "review-loop setup"})["id"]
+    return meko_call(tok, "datapack_create", {"name": name, "conversation_id": boot, "agent_id": MEKO_AGENT,
+                                              "description": f"Private author guide for {slug}, written by "
+                                                             "review-loop's exit step. Never give to reviewers."})["datapack_id"]
+
+
+def meko_guide_get(tok, slug):
+    dp = meko_datapack(tok, slug, create=False)
+    if not dp:
+        return None, None
+    items = meko_rest(tok, f"/datapacks/{dp}/artifacts?q={GUIDE_ARTIFACT}")["items"]
+    items = [i for i in items if i["filename"] == GUIDE_ARTIFACT]
+    if not items:
+        return None, None
+    art = meko_rest(tok, f"/datapacks/{dp}/artifacts/{items[0]['content_hash']}")
+    return base64.b64decode(art["content_base64"]).decode(), items[0]["content_hash"]
+
+
+def meko_guide_put(tok, slug, text, history):
+    dp = meko_datapack(tok, slug, create=True)
+    conv = meko_call(tok, "conversation_create", {"datapack_id": dp, "agent_id": MEKO_AGENT,
+                                                  "session_id": "review-loop-guide-" + slug.replace("/", "__"),
+                                                  "title": f"Author guide revisions: {slug}"})["id"]
+    art = meko_call(tok, "artifact_put", {"datapack_id": dp, "conversation_id": conv, "agent_id": MEKO_AGENT,
+                                          "filename": GUIDE_ARTIFACT, "content_type": "text/markdown",
+                                          "content_base64": base64.b64encode(text.encode()).decode()})
+    if history:
+        meko_call(tok, "memory_add", {"datapack_id": dp, "conversation_id": conv, "agent_id": MEKO_AGENT,
+                                      "text": history})
+    return dp, art["content_hash"]
+
+
+def load_guide(root, timeout_ok=True):
+    """(text, source, note): Meko first (refreshing the local cache), else the local file."""
+    slug = repo_slug(root)
+    local = guide_file(root)
+    note = ""
+    if guide_store() != "file":
+        try:
+            text, h = meko_guide_get(meko_token(), slug)
+            if text is not None:
+                if not os.path.exists(local) or open(local).read() != text:
+                    with open(local, "w") as fh:
+                        fh.write(text)
+                return text, f"meko:{h[:12]}", ""
+            note = "Meko has no guide for this repository yet"
+        except MekoError as e:
+            note = f"Meko unavailable ({e}); using the local copy"
+    if os.path.exists(local):
+        return open(local).read(), "file", note
+    return None, "none", note
+
+
+def cmd_guide_pull(a):
+    root = repo_root()
+    if not root:
+        sys.exit("not inside a git repository")
+    text, source, note = load_guide(root)
+    print(json.dumps({"source": source, "path": guide_file(root), "store": guide_store(),
+                      "meko_datapack": meko_datapack_name(repo_slug(root)), "note": note,
+                      "chars": len(text or "")}, indent=2))
+
+
+def cmd_guide_push(a):
+    """Save an approved guide revision: Meko (versioned artifact + history memory), then the local cache."""
+    root = repo_root()
+    if not root:
+        sys.exit("not inside a git repository")
+    slug = repo_slug(root)
+    text = open(a.file).read().strip() + "\n"
+    hist_path = guide_file(root, ".history.md")
+    history = open(a.history_file).read().strip() if a.history_file else ""
+    seen = a.marker and os.path.exists(hist_path) and a.marker in open(hist_path).read()
+    stamped = f"<!-- author guide for {slug}; saved {now()}{'; ' + a.marker if a.marker else ''} -->\n" + \
+        re.sub(r"^<!-- author guide for .*? -->\n", "", text)
+    store, where = guide_store(), "file"
+    if store != "file":
+        try:
+            dp, h = meko_guide_put(meko_token(), slug, stamped, "" if seen else history)
+            where = f"meko:{h[:12]} (datapack {meko_datapack_name(slug)})"
+        except MekoError as e:
+            if store == "meko":
+                sys.exit(f"guide not saved: {e}. Start Meko (`meko start`) or set guide_store to file.")
+            print(f"warning: {e}; saved locally only", file=sys.stderr)
+    with open(guide_file(root), "w") as fh:
+        fh.write(stamped)
+    if history and not seen:
+        lead = "\n" if os.path.exists(hist_path) and os.path.getsize(hist_path) else ""
+        with open(hist_path, "a") as fh:
+            fh.write(lead + f"## {now()} {a.marker or ''}\n\n{history}\n")
+    print(json.dumps({"saved": where, "local": guide_file(root), "history": "skipped (marker already recorded)"
+                      if seen else (hist_path if history else "none")}, indent=2))
+
+
+def cmd_learnings_context(a):
+    """SessionStart hook: give the *author* session the lessons of earlier loops in this repo.
+    Subagents do not run SessionStart, and the gate process runs with hooks disabled, so reviewers
+    never receive this text. Never fails the session."""
+    try:
+        payload = json.load(sys.stdin)
+    except Exception:
+        payload = {}
+    try:
+        root = repo_root(payload.get("cwd") or os.getcwd())
+        if not root:
+            return 0
+        parts = []
+        g = os.path.join(RL_HOME, "guides", "_global.md")
+        if os.path.exists(g) and open(g).read().strip():
+            parts.append(f"<!-- {g} -->\n" + open(g).read().strip())
+        text, source, note = load_guide(root)
+        if text and text.strip():
+            parts.append(f"<!-- author guide for {repo_slug(root)} (from {source}) -->\n" + text.strip())
+        if note and parts:
+            parts.append(f"(note: {note})")
+        if not parts:
+            return 0
+        text = "\n\n".join(parts)
+        if len(text) > LEARNINGS_CONTEXT_CAP:
+            text = text[:LEARNINGS_CONTEXT_CAP] + "\n\n[truncated; read the files named above for the rest]"
+        ctx = ("Author guide for this repository, distilled from earlier review loops (why past changes had "
+               "bugs, and the design choices that were confirmed). Follow it while writing code. Never paste "
+               "it into a review-loop reviewer prompt.\n\n" + text)
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": ctx}}))
+    except Exception:
+        return 0
+    return 0
 
 
 def main():
@@ -941,11 +1486,12 @@ def main():
     x.add_argument("--reviewer-model")
     x.add_argument("--strict", action="store_true"); x.add_argument("--no-gate", action="store_true")
     x.add_argument("--gate-model"); x.add_argument("--checks", help="commands separated by ';;'")
+    x.add_argument("--review-skill", help="team review skill reviewers must apply, e.g. branch-review")
     x.add_argument("--force", action="store_true"); x.set_defaults(fn=cmd_init)
     s.add_parser("detect-checks").set_defaults(fn=cmd_detect_checks)
     x = s.add_parser("set-intent"); x.add_argument("--file", required=True); x.set_defaults(fn=cmd_set_intent)
     x = s.add_parser("set-checks"); x.add_argument("checks"); x.set_defaults(fn=cmd_set_checks)
-    x = s.add_parser("snapshot"); x.add_argument("--kind", choices=["review", "gate"], default="review"); x.set_defaults(fn=cmd_snapshot)
+    x = s.add_parser("snapshot"); x.add_argument("--kind", choices=["review", "gate", "pr"], default="review"); x.set_defaults(fn=cmd_snapshot)
     x = s.add_parser("run-checks"); x.add_argument("--timeout", type=int, default=900)
     x.add_argument("--probe", action="store_true", help="validate checks before round 1"); x.set_defaults(fn=cmd_run_checks)
     x = s.add_parser("brief"); x.add_argument("--mode", choices=["full", "delta", "gate"], required=True)
@@ -954,7 +1500,21 @@ def main():
     x = s.add_parser("triage"); x.add_argument("id"); x.add_argument("verdict", choices=TRIAGE_VERDICTS)
     x.add_argument("--note"); x.add_argument("--duplicate-of"); x.add_argument("--verifier", choices=["real", "not-real", "uncertain"])
     x.add_argument("--option", action="append"); x.add_argument("--recommend"); x.set_defaults(fn=cmd_triage)
-    x = s.add_parser("fixed"); x.add_argument("ids", nargs="+"); x.add_argument("--note"); x.set_defaults(fn=cmd_fixed)
+    x = s.add_parser("fixed"); x.add_argument("ids", nargs="+"); x.add_argument("--note")
+    x.add_argument("--lesson", help="the reusable pattern this fix teaches")
+    x.add_argument("--cause", choices=sorted(MISS_CAUSES)); x.add_argument("--why"); x.add_argument("--guide-ref")
+    x.set_defaults(fn=cmd_fixed)
+    x = s.add_parser("miss"); x.add_argument("id"); x.add_argument("--cause", choices=sorted(MISS_CAUSES), required=True)
+    x.add_argument("--why", required=True); x.add_argument("--guide-ref"); x.set_defaults(fn=cmd_miss)
+    x = s.add_parser("lesson"); x.add_argument("id"); x.add_argument("text"); x.set_defaults(fn=cmd_lesson)
+    x = s.add_parser("reopen"); x.add_argument("--pr", type=int, required=True)
+    x.add_argument("--extra-rounds", type=int, default=3); x.set_defaults(fn=cmd_reopen)
+    x = s.add_parser("pr-ingest"); x.add_argument("--from-file"); x.set_defaults(fn=cmd_pr_ingest)
+    x = s.add_parser("pr-replies"); x.add_argument("--post", action="store_true"); x.set_defaults(fn=cmd_pr_replies)
+    s.add_parser("learnings-context").set_defaults(fn=cmd_learnings_context)
+    s.add_parser("guide-pull").set_defaults(fn=cmd_guide_pull)
+    x = s.add_parser("guide-push"); x.add_argument("--file", required=True); x.add_argument("--history-file")
+    x.add_argument("--marker"); x.set_defaults(fn=cmd_guide_push)
     x = s.add_parser("status"); x.add_argument("--json", action="store_true"); x.add_argument("-v", "--verbose", action="store_true"); x.set_defaults(fn=cmd_status)
     x = s.add_parser("show"); x.add_argument("id"); x.set_defaults(fn=cmd_show)
     s.add_parser("verify-tree").set_defaults(fn=cmd_verify_tree)

@@ -1,5 +1,5 @@
 {
-  "description": "review-loop: keep the orchestrating session in the loop while a review loop is running (state-gated, session-gated, at most 3 nudges per round)",
+  "description": "review-loop: Stop guard keeps the orchestrating session in a running loop (state-gated, session-gated, at most 3 nudges per round); SessionStart gives the author session its author guide (never reviewers: subagents skip SessionStart and the gate disables hooks)",
   "hooks": {
     "Stop": [
       {
@@ -8,6 +8,17 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/review-loop/scripts/rl.py\" guard",
             "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/review-loop/scripts/rl.py\" learnings-context",
+            "timeout": 10
           }
         ]
       }

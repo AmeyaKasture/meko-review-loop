@@ -1,7 +1,7 @@
 {
   "name": "review-loop",
-  "version": "0.3.0",
-  "description": "Fresh-context review, fix, repeat: independent read-only reviewers, anti-self-bias triage, a separate-process gate review, and a report that asks you about every judgement call.",
+  "version": "0.4.0",
+  "description": "Fresh-context review, fix, repeat until clean, with a separate-process gate, PR-comment responses, and private author lessons.",
   "author": {
     "name": "Ameya Kasture"
   },
