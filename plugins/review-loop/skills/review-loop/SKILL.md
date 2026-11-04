@@ -65,6 +65,14 @@ your first triage.
 
 ## Phase 1: review round
 
+0. **Declare the hidden test scope (Go).** When checks use `{go_packages}`, the
+   engine runs them on the changed packages plus the packages that import
+   them. You wrote the code, so you know what the import graph cannot see:
+   packages reached through interfaces, registries, reflection, generated
+   code, shared config or SQL, and tests elsewhere that exercise this
+   behaviour. Add them: `rl.py scope --add ./src/x ./cmd/y --note "<why>"`,
+   then check `rl.py scope`. You can widen the scope, never narrow it. Only
+   the package list reaches reviewers, never your note.
 1. `rl.py snapshot` (creates `refs/review-loop/round-N`; the user's index and
    HEAD are untouched).
 2. `rl.py run-checks` (use `run_in_background` if the suite is slow).

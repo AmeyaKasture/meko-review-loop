@@ -47,6 +47,7 @@ them; follow the guide's review criteria, not its process steps.
 The orchestrator ran the project checks on this snapshot. Summary and logs:
 `{{CHECKS_PATH}}` (read `summary.json`, then the `.log` files it names).
 
+{{SCOPE}}
 - Every error from a check is a finding (`check-failure`).
 - Every warning located in a file touched by this change is a finding
   (`check-warning`, severity `major` unless clearly cosmetic).

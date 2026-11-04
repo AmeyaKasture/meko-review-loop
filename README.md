@@ -190,6 +190,10 @@ Variants:
   missing tool cannot block convergence forever.
 
 **Phase 1: review round.**
+- **Go test scope.** Checks that contain `{go_packages}` run only on the
+  packages that matter (see [Scoped Go checks](#scoped-go-checks)). Before
+  each round, the main session declares any extra packages it knows are
+  affected: `rl.py scope --add ./src/x --note "registry lookup"`.
 - Snapshots the whole working tree, untracked files included, as a commit
   under `refs/review-loop/round-N`, using a temporary git index. Your HEAD,
   index, and stash are never touched.
@@ -201,8 +205,10 @@ Variants:
     that checks only the fixes since the previous round, where regressions
     hide.
 - Reviewers apply your **team review skill** if one is configured, read every
-  governing **rule file**, run checks, try to reproduce defects in a scratch
-  directory, and write schema-validated JSON.
+  governing **rule file**, read the check logs (they do not re-run suites),
+  try to reproduce defects in a scratch directory, and write schema-validated
+  JSON. If an affected package is missing from the test scope, they report it
+  as a `test-gap` finding and it is added for the next round.
 - `verify-tree` confirms no reviewer modified the repository, then the
   output is ingested into the ledger.
 
@@ -503,6 +509,42 @@ Command-line flags override both.
 | `--review-skill NAME` | Team review skill. |
 | `--checks "a;;b"` | Exact check commands, separated by `;;`. |
 
+### Scoped Go checks
+
+Put `{go_packages}` in a check and the engine fills it in each round with:
+
+| Source | Packages |
+|---|---|
+| The diff | Every package with a changed `.go` file. |
+| The import graph (`go list`, about 0.5 s) | Packages that import those, to `go_reverse_depth` levels (default 1), including test imports. |
+| The main session | Packages it declared with `rl.py scope --add`: links the import graph cannot see (interfaces, registries, reflection, generated code, shared config or SQL, tests elsewhere). |
+| Reviewers | A `test-gap` finding naming a missing package; once accepted, it is added with `scope --add`. |
+
+The main session can widen the scope, never narrow it: the engine always
+computes the minimum itself. Keep a full `go build ./...` alongside, so a
+broken caller anywhere still fails compilation. A round with no Go change
+skips scoped checks. On yb-voyager's recent history this chose 7 to 10 of 57
+packages; unit tests for one package take about 2 to 27 seconds.
+
+```json
+"go_module": "yb-voyager",
+"go_tags": "unit",
+"go_reverse_depth": 1,
+"checks": [
+  "cd yb-voyager && go build ./...",
+  "cd yb-voyager && go vet -tags unit {go_packages}",
+  "cd yb-voyager && go test -tags unit -count=1 {go_packages}"
+]
+```
+
+| Key | Default | Effect |
+|---|---|---|
+| `go_module` | auto (the `go.mod` with most changed files) | Module directory, relative to the repository root. |
+| `go_tags` | none | Build tags for `go list`. |
+| `go_reverse_depth` | 1 | How many levels of importers to include. |
+
+`rl.py scope` prints the current scope with the reason for each package.
+
 ### Global settings and environment
 
 | Setting | Effect |
@@ -553,6 +595,7 @@ for you; it is also handy for inspection. Run it from inside the repository.
 |---|---|
 | `init [--target T] [--base REF] [--intent-file F] [--session ID] [--max-rounds N] [--strict] [--no-gate] [--gate-model M] [--reviewer-model M] [--review-skill S] [--checks "a;;b"] [--force]` | Start a loop. Refuses to discard unsaved lessons without `--force`. |
 | `detect-checks`, `set-checks "a;;b"`, `run-checks [--probe] [--timeout S]` | Choose, validate, and run checks. |
+| `scope [--add PKG ...] [--note TEXT]` | Show the Go test scope, or widen it with packages the import graph cannot see. |
 | `set-intent --file F` | Change the intent before round 1. |
 | `snapshot [--kind review\|gate\|pr]` | Snapshot the tree for a new round. |
 | `brief --mode full\|delta\|gate --name N [--lens TEXT]` | Generate a reviewer brief. |
@@ -575,7 +618,7 @@ for you; it is also handy for inspection. Run it from inside the repository.
 ## Testing
 
 ```
-bash tests/test_engine.sh          # 91 offline checks, no model calls, no network
+bash tests/test_engine.sh          # 100 offline checks, no model calls, no network (Go scope tests need `go`)
 bash tests/test_meko_live.sh       # 9 live checks against a running local Meko (throwaway datapack)
 claude plugin validate --strict .
 claude plugin validate --strict plugins/review-loop
@@ -586,7 +629,9 @@ skill briefs, the size gate and check probe, ingestion repairs, all triage
 rules (verifier gate, duplicates, regressions, oscillation), the three
 outcomes, miss diagnoses, report order, PR ingestion (resolved and own
 comments skipped, severity parsing of real comment formats), reply drafts and
-the push guard, the hooks, and the file-mode guide store. CI runs it on every
+the push guard, the hooks, the file-mode guide store, and Go test scoping
+(changed packages, importers, author declarations, unrelated packages left
+out, placeholder substitution). CI runs it on every
 push.
 
 ---
@@ -596,7 +641,8 @@ push.
 | Symptom | Meaning and fix |
 |---|---|
 | `SIZE GATE` after init | The change is large. Confirm, or split it. |
-| `[ENV-ERROR]` / `NEXT: FIX_CHECKS` | A check cannot run here (missing tool). Replace it with `rl.py set-checks`. |
+| `[ENV-ERROR]` / `NEXT: FIX_CHECKS` | A check cannot run here (missing tool, or `go list` failed for `{go_packages}`). Replace it with `rl.py set-checks`, or fix `go_module` / `go_tags`. |
+| `[SKIP]` on a scoped check | The round changed no Go package. |
 | `invalid reviewer output` | The orchestrator asks that reviewer to rewrite its JSON, or records `drop-reviewer`. It never skips one silently. |
 | `requires an independent verifier` | You tried to call a serious finding not valid. Run `finding-verifier` first. |
 | `NEXT: CAPPED` | Round cap reached with blocking findings left; see the report. |

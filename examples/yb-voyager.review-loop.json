@@ -1,9 +1,13 @@
 {
-  "_comment": "yb-voyager. Installed privately as ~/.claude/review-loop/repos/yugabyte__yb-voyager.json so the team repo needs no new file. Commands come from the repo's AGENTS.md; reviewers also run gofmt, go vet on changed packages, and the other branch-review mechanical checks.",
+  "_comment": "yb-voyager. Installed privately as ~/.claude/review-loop/repos/yugabyte__yb-voyager.json so the team repo needs no new file. {go_packages} = changed packages + their direct importers + packages the author declares with `rl.py scope --add`; go build ./... still compiles everything, so broken callers anywhere are caught.",
   "review_skill": "branch-review",
+  "go_module": "yb-voyager",
+  "go_tags": "unit",
+  "go_reverse_depth": 1,
   "checks": [
     "cd yb-voyager && go build ./...",
-    "cd yb-voyager && go vet -tags unit ./cmd/... ./src/..."
+    "cd yb-voyager && go vet -tags unit {go_packages}",
+    "cd yb-voyager && go test -tags unit -count=1 {go_packages}"
   ],
   "max_rounds": 4,
   "strict": false,

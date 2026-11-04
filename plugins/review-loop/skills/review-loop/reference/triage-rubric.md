@@ -42,12 +42,15 @@ Bookkeeping verdicts, used rarely:
 7. **Questions** (severity `question`, often from the team review skill) are
    answered the same way: valid if they expose something to change, not valid
    with the answer as the reason, or doubtful if only the user can answer.
-8. **Nits** may be called not valid without a verifier ("style preference"),
+8. **A `test-gap` finding that names a package missing from the Go test
+   scope** is valid by default: `rl.py scope --add <pkg>` so it runs next
+   round, and record the miss as `context-gap`.
+9. **Nits** may be called not valid without a verifier ("style preference"),
    and never drive another round.
-9. **Findings flagged `[outside change]`** point at files the change does not
+10. **Findings flagged `[outside change]`** point at files the change does not
    touch. They are often pre-existing (`defer`), but a change can break an
    untouched caller; then they are valid.
-10. **Do not toggle** between two designs across rounds. The second time a
+11. **Do not toggle** between two designs across rounds. The second time a
     design question comes up, it is doubtful.
 
 ## Why did I miss it? (the memory of each valid fix)
