@@ -364,6 +364,109 @@ def need_round(st):
     return st["round"]
 
 
+# ------------------------------------------------------------ go test scope
+GO_PLACEHOLDER = "{go_packages}"
+
+
+def go_module_dir(root, cfg, changed):
+    if cfg.get("go_module"):
+        return os.path.join(root, cfg["go_module"])
+    counts = {}
+    for f in changed:
+        if not f.endswith(".go"):
+            continue
+        d = os.path.dirname(os.path.join(root, f))
+        while d.startswith(root):
+            if os.path.exists(os.path.join(d, "go.mod")):
+                counts[d] = counts.get(d, 0) + 1
+                break
+            d = os.path.dirname(d)
+    return max(counts, key=counts.get) if counts else None
+
+
+def go_scope(root, st):
+    """The packages scoped checks run on: changed packages, their importers (to `go_reverse_depth`),
+    and packages the author declared. The author can widen the scope, never narrow it."""
+    cfg = load_config(root)
+    if st["round"]:
+        changed = sh(["git", "diff", "--name-only", st["base"], st["rounds"][str(st["round"])]["snapshot"]],
+                     cwd=root).splitlines()
+    else:  # before round 1: the working tree, untracked files included
+        changed = sh(["git", "diff", "--name-only", st["base"]], cwd=root).splitlines() + \
+            sh(["git", "ls-files", "--others", "--exclude-standard"], cwd=root).splitlines()
+    mod = go_module_dir(root, cfg, changed)
+    if not mod:
+        return {"module": None, "packages": [], "why": {}, "error": ""}
+    tags = cfg.get("go_tags", "")
+    r = subprocess.run(["go", "list"] + (["-tags", tags] if tags else []) + ["-e", "-f",
+                       "{{.ImportPath}}|{{.Dir}}|{{join .Imports \" \"}} {{join .TestImports \" \"}} "
+                       "{{join .XTestImports \" \"}}", "./..."], cwd=mod, capture_output=True, text=True)
+    if r.returncode != 0:
+        return {"module": os.path.relpath(mod, root), "packages": [], "why": {}, "error": r.stderr.strip()[:500]}
+    pkgs, imports = {}, {}
+    for line in r.stdout.splitlines():
+        ip, d, imps = (line.split("|") + ["", ""])[:3]
+        pkgs[ip] = d
+        imports[ip] = set(imps.split())
+    by_dir = {d: ip for ip, d in pkgs.items()}
+    why = {}
+    for f in changed:
+        d = os.path.dirname(os.path.join(root, f))
+        if f.endswith(".go") and d in by_dir:
+            why.setdefault(by_dir[d], "changed")
+    frontier = set(why)
+    for _ in range(int(cfg.get("go_reverse_depth", 1))):
+        nxt = {ip for ip, imps in imports.items() if imps & frontier and ip not in why}
+        for ip in nxt:
+            why[ip] = "imports changed code"
+        frontier = nxt
+    rel_to_ip = {"./" + os.path.relpath(d, mod) if d != mod else ".": ip for ip, d in pkgs.items()}
+    for p in st.get("scope_declared", []):
+        ip = p if p in pkgs else rel_to_ip.get(norm_pkg(p))
+        if ip:
+            why.setdefault(ip, "declared by author")
+    rel = lambda ip: "./" + os.path.relpath(pkgs[ip], mod) if pkgs[ip] != mod else "."
+    ordered = sorted(why, key=lambda ip: (["changed", "imports changed code", "declared by author"].index(why[ip]), ip))
+    return {"module": os.path.relpath(mod, root), "packages": [rel(ip) for ip in ordered],
+            "why": {rel(ip): why[ip] for ip in ordered}, "error": "", "known": sorted(rel_to_ip)}
+
+
+def is_import_path(p):
+    return "." in p.split("/")[0] and not p.startswith(".")
+
+
+def norm_pkg(p):
+    p = p.rstrip("/")
+    if is_import_path(p) or p == "." or p.startswith("./"):
+        return p
+    return "./" + p
+
+
+def cmd_scope(a):
+    """Author-declared test scope: packages affected in ways the import graph cannot see
+    (interfaces, registries, reflection, shared config or SQL, tests elsewhere)."""
+    root = repo_root()
+    st = load(root)
+    if a.add:
+        cur = go_scope(root, st)
+        known = set(cur.get("known", []))
+        norm = [norm_pkg(p) for p in a.add]
+        bad = [p for p in norm if p not in known and not is_import_path(p)]
+        if bad:
+            sys.exit(f"not a package in {cur['module']}: {', '.join(bad)}")
+        st.setdefault("scope_declared", [])
+        st["scope_declared"] += [p for p in norm if p not in st["scope_declared"]]
+        if a.note:
+            st.setdefault("scope_notes", []).append(a.note)
+        save(root, st)
+    sc = go_scope(root, st)
+    if sc["error"]:
+        print(f"go list failed in {sc['module']}: {sc['error']}")
+    print(f"module: {sc['module'] or '(no Go change)'}  packages in scope: {len(sc['packages'])}")
+    for p in sc["packages"]:
+        print(f"  {p:<40} {sc['why'][p]}")
+
+
 ENV_ERROR_RE = re.compile(r"No module named|command not found|not recognized as an internal|"
                           r"Cannot find module|ENOENT|No such file or directory: '|executable file not found|"
                           r"Unknown command|is not installed", re.I)
@@ -378,8 +481,22 @@ def cmd_run_checks(a):
     d = os.path.join(round_dir(root, n), "checks" if not a.probe else "probe")
     os.makedirs(d, exist_ok=True)
     results = []
+    scope = go_scope(root, st) if any(GO_PLACEHOLDER in c for c in st["checks"]) else None
     for i, c in enumerate(st["checks"]):
         log = os.path.join(d, f"{i:02d}.log")
+        if scope is not None and GO_PLACEHOLDER in c:
+            if scope["error"]:
+                with open(log, "w") as f:
+                    f.write(f"$ {c}\n(go list failed)\n\n{scope['error']}")
+                results.append({"command": c, "exit_code": 127, "log": log, "warning_mentions": 0, "env_error": True})
+                continue
+            if not scope["packages"]:
+                with open(log, "w") as f:
+                    f.write(f"$ {c}\n(skipped: no Go package in scope)\n")
+                results.append({"command": c, "exit_code": 0, "log": log, "warning_mentions": 0,
+                                "env_error": False, "skipped": True})
+                continue
+            c = c.replace(GO_PLACEHOLDER, " ".join(scope["packages"]))
         try:
             r = subprocess.run(c, shell=True, cwd=root, capture_output=True, text=True, timeout=a.timeout)
             code, outp = r.returncode, r.stdout + "\n--- stderr ---\n" + r.stderr
@@ -395,18 +512,24 @@ def cmd_run_checks(a):
     broken = [r["command"] for r in results if r["env_error"]]
     summary = {"round": n, "all_passed": ok, "configured": bool(st["checks"]), "env_errors": broken,
                "results": results}
+    if scope is not None:
+        summary["scope"] = {k: scope[k] for k in ("module", "packages", "why")}
     with open(os.path.join(d, "summary.json"), "w") as f:
         json.dump(summary, f, indent=2)
     if not a.probe:
         st["rounds"][str(n)]["checks_ok"] = ok if st["checks"] else None
         st["rounds"][str(n)]["checks_broken"] = broken
+        if scope is not None:
+            st["rounds"][str(n)]["scope"] = summary["scope"]
         save(root, st)
     for r in results:
-        tag = "ENV-ERROR" if r["env_error"] else ("PASS" if r["exit_code"] == 0 else "FAIL")
+        tag = "ENV-ERROR" if r["env_error"] else ("SKIP" if r.get("skipped") else "PASS" if r["exit_code"] == 0 else "FAIL")
         print(f"[{tag}] exit={r['exit_code']} warn~{r['warning_mentions']}  {r['command']}")
     if broken:
         print("Some checks cannot run in this environment (missing tool/module). Replace them with "
               "`rl.py set-checks` and re-run; they would otherwise block convergence forever.")
+    if scope is not None and scope["packages"]:
+        print(f"scope ({scope['module']}): " + ", ".join(f"{p} [{scope['why'][p]}]" for p in scope["packages"]))
     if not st["checks"]:
         print("no checks configured; reviewers will discover and run checks themselves.")
     print(f"summary: {os.path.join(d, 'summary.json')}")
@@ -496,6 +619,16 @@ def cmd_brief(a):
     rep["GUIDES"] = ("\n".join(f"- `{g}`" for g in guides) if guides else
                      "- (none found; apply general engineering judgement)")
     rep["REVIEW_SKILL"] = review_skill_section(root, st, a.mode, prev, r["snapshot"])
+    sc = r.get("scope")
+    rep["SCOPE"] = ("" if not sc else
+        "\n**Scoped tests.** The orchestrator ran the Go checks on these packages of module "
+        f"`{sc['module']}` (see `scope` in `summary.json`):\n\n"
+        + "\n".join(f"- `{p}` ({w})" for p, w in sc["why"].items()) +
+        "\n\nDo not re-run whole-module suites; read the logs instead. Run a targeted test only to "
+        "reproduce a suspected defect. If a package affected by this change is missing from the list "
+        "(it reaches the changed code through an interface, registry, reflection, generated code, shared "
+        "config or SQL, or its tests exercise the changed behaviour), report a `test-gap` finding whose "
+        "`claim` names the package; it will be added to the scope.\n")
     text = open(BRIEF_TEMPLATE).read()
     for k, v in rep.items():
         text = text.replace("{{" + k + "}}", v)
@@ -1491,6 +1624,7 @@ def main():
     s.add_parser("detect-checks").set_defaults(fn=cmd_detect_checks)
     x = s.add_parser("set-intent"); x.add_argument("--file", required=True); x.set_defaults(fn=cmd_set_intent)
     x = s.add_parser("set-checks"); x.add_argument("checks"); x.set_defaults(fn=cmd_set_checks)
+    x = s.add_parser("scope"); x.add_argument("--add", nargs="+"); x.add_argument("--note"); x.set_defaults(fn=cmd_scope)
     x = s.add_parser("snapshot"); x.add_argument("--kind", choices=["review", "gate", "pr"], default="review"); x.set_defaults(fn=cmd_snapshot)
     x = s.add_parser("run-checks"); x.add_argument("--timeout", type=int, default=900)
     x.add_argument("--probe", action="store_true", help="validate checks before round 1"); x.set_defaults(fn=cmd_run_checks)

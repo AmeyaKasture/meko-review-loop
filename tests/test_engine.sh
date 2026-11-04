@@ -239,4 +239,36 @@ expect "bugbot-style severity" "$sev" "major High Severity bug"
 expect "untagged question" "$sev" "question Why here?"
 expect "untagged inline request" "$sev" "major Rename it."
 
+if command -v go >/dev/null 2>&1; then
+echo "go test scope: changed + importers + author-declared"
+T3="$(mktemp -d)"; cd "$T3"; git init -q -b main; git config user.email t@t; git config user.name t
+git remote add origin https://github.com/acme/gomod.git
+mkdir -p svc/a svc/b svc/c svc/d
+printf 'module example.com/m\n\ngo 1.21\n' > svc/go.mod
+printf 'package a\n\nfunc F() int { return 1 }\n' > svc/a/a.go
+printf 'package b\n\nimport "example.com/m/a"\n\nfunc G() int { return a.F() }\n' > svc/b/b.go
+printf 'package c\n\nfunc H() int { return 3 }\n' > svc/c/c.go
+printf 'package d\n\nfunc R() int { return 4 }\n' > svc/d/d.go
+printf 'package a\n\nimport "testing"\n\nfunc TestF(t *testing.T) { if F() != 2 { t.Fatal("F") } }\n' > svc/a/a_test.go
+git add -A; git commit -qm init; git checkout -qb feat
+printf 'package a\n\nfunc F() int { return 2 }\n' > svc/a/a.go
+echo '{"go_module": "svc", "gate": false}' > "$REVIEW_LOOP_HOME/repos/acme__gomod.json"
+"$RL" init --session S11 --target feat --checks "cd svc && go vet {go_packages};;cd svc && go test -count=1 {go_packages}" >/dev/null
+expect "author can declare a hidden dependent" "$("$RL" scope --add d --note "registry lookup")" "./d                                      declared by author"
+expect "unknown package rejected" "$("$RL" scope --add nope 2>&1 || true)" "not a package"
+"$RL" snapshot >/dev/null
+rc="$("$RL" run-checks)"
+expect "changed package in scope" "$rc" "./a [changed]"
+expect "importer in scope" "$rc" "./b [imports changed code]"
+expect "declared package in scope" "$rc" "./d [declared by author]"
+if grep -qF " ./c" <<<"$rc"; then bad "unrelated package left out"; else ok "unrelated package left out"; fi
+expect "scoped tests actually ran" "$(cat .review-loop/rounds/1/checks/01.log)" "go test -count=1 ./a ./b ./d"
+b="$(jq -r .brief <<<"$("$RL" brief --mode full --name s)")"
+expect "brief lists scope with reasons" "$(cat "$b")" '`./b` (imports changed code)'
+expect "brief tells reviewers to report missing packages" "$(cat "$b")" "report a \`test-gap\` finding"
+cd "$T"; rm -rf "$T3"
+else
+echo "go not installed: skipping go scope tests"
+fi
+
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

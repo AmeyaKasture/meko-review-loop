@@ -30,6 +30,11 @@
   over Meko's local MCP endpoint, with the local file as cache and fallback
   (`guide_store`: `meko`, `auto`, or `file`). Reviewers are told never to
   query Meko, and have no MCP tools.
+- Scoped Go checks: `{go_packages}` in a check expands to the changed packages,
+  their importers (`go_reverse_depth`), and packages the author declares with
+  `rl.py scope --add` (widen only, never narrow). Briefs list the scope with
+  reasons; reviewers read the logs instead of re-running suites and report
+  missing packages as `test-gap` findings.
 - Reviewers no longer receive team pitfalls or any author history.
 - Removed the cloud-oriented Meko extension and the AgentK bridge.
 

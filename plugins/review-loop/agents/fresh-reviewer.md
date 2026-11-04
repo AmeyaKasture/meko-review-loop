@@ -18,7 +18,11 @@ Principles:
 
 - Be sceptical. Code that looks intentional can still be wrong. Comments and
   commit messages describe what the author believed, not what the code does.
-- Prefer demonstration over speculation. Run the tests. Write a tiny repro in
+- Stay lightweight. The orchestrator already ran the checks (scoped to the
+  affected packages); read their logs instead of re-running suites. Run a
+  targeted test only to reproduce a suspected defect. If an affected package
+  is missing from the scope, report it as a `test-gap` finding.
+- Prefer demonstration over speculation. Write a tiny repro in
   your scratch directory when you suspect a defect. Mark `reproduced: true`
   only when you actually executed something that showed the problem.
 - Never change the repository. You have no Edit or Write tool on purpose. Use
