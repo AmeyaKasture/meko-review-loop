@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>review-loop Workflow</title>
+<meta name="description" content="The review-loop workflow: fresh-context review with branch-review, three-outcome triage, PR comment responses, and a private author guide revised from why each bug was missed.">
+<style>
+:root{
+  --bg:#f7f6f2; --surface:#ffffff; --surface-2:#efede6; --ink:#1d1c1a; --muted:#5f5c55;
+  --line:#dcd8cd; --accent:#2f5d8a; --accent-soft:#e3ecf5; --good:#2e7047; --good-soft:#e2f1e7;
+  --warn:#8a5a12; --warn-soft:#f7ecd7; --bad:#9b2f2f; --bad-soft:#f6e1e1; --code-bg:#f0eee8;
+  --shadow:0 1px 2px rgba(0,0,0,.05),0 4px 16px rgba(0,0,0,.04);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#151719; --surface:#1d2023; --surface-2:#24282c; --ink:#e8e6e1; --muted:#a29f98;
+    --line:#33383d; --accent:#7fb0e0; --accent-soft:#1f2f40; --good:#7ccf99; --good-soft:#1c3226;
+    --warn:#e3b465; --warn-soft:#3a2e18; --bad:#ee8f8f; --bad-soft:#3d2222; --code-bg:#24282c;
+    --shadow:none;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#151719; --surface:#1d2023; --surface-2:#24282c; --ink:#e8e6e1; --muted:#a29f98;
+  --line:#33383d; --accent:#7fb0e0; --accent-soft:#1f2f40; --good:#7ccf99; --good-soft:#1c3226;
+  --warn:#e3b465; --warn-soft:#3a2e18; --bad:#ee8f8f; --bad-soft:#3d2222; --code-bg:#24282c;
+  --shadow:none;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.86em}
+code{background:var(--code-bg);padding:.1em .35em;border-radius:4px}
+pre{background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:14px 16px;overflow-x:auto;line-height:1.5;margin:12px 0}
+pre code{background:none;padding:0}
+a{color:var(--accent)}
+.wrap{max-width:1120px;margin:0 auto;padding:0 16px;display:grid;grid-template-columns:220px minmax(0,1fr);gap:40px}
+nav.toc{position:sticky;top:0;align-self:start;padding:32px 0;max-height:100vh;overflow:auto}
+nav.toc h2{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 10px}
+nav.toc a{display:block;color:var(--muted);text-decoration:none;padding:5px 0 5px 12px;border-left:2px solid var(--line);font-size:14px}
+nav.toc a:hover{color:var(--ink);border-left-color:var(--accent)}
+main{padding:32px 0 80px;min-width:0}
+header.hero{padding:8px 0 20px;border-bottom:1px solid var(--line);margin-bottom:8px}
+.eyebrow{font-size:13px;color:var(--muted);letter-spacing:.04em}
+h1{font-size:clamp(28px,4vw,40px);line-height:1.15;margin:6px 0 10px;letter-spacing:-.01em}
+.lede{font-size:18px;color:var(--muted);max-width:62ch;margin:0}
+.meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.chip{font-size:12.5px;padding:3px 10px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+section{padding-top:36px}
+h2{font-size:24px;margin:0 0 6px;letter-spacing:-.005em}
+h2 .num{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:8px}
+h3{font-size:17px;margin:26px 0 8px}
+p{margin:8px 0;max-width:72ch}
+.sub{color:var(--muted);margin-top:0}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:18px 0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;box-shadow:var(--shadow)}
+.card h4{margin:0 0 4px;font-size:15px}
+.card p{margin:0;font-size:14.5px;color:var(--muted)}
+.card.good{border-top:3px solid var(--good)} .card.warn{border-top:3px solid var(--warn)}
+.card.bad{border-top:3px solid var(--bad)} .card.info{border-top:3px solid var(--accent)}
+.tbl{overflow-x:auto;margin:12px 0;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:14.5px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{background:var(--surface-2);font-weight:600;font-size:13px;color:var(--muted)}
+tr:last-child td{border-bottom:none}
+.tag{display:inline-block;font-size:12px;font-weight:600;padding:1px 8px;border-radius:999px;white-space:nowrap}
+.tag.good{background:var(--good-soft);color:var(--good)} .tag.warn{background:var(--warn-soft);color:var(--warn)}
+.tag.bad{background:var(--bad-soft);color:var(--bad)} .tag.info{background:var(--accent-soft);color:var(--accent)}
+.callout{border-left:4px solid var(--accent);background:var(--accent-soft);padding:12px 16px;border-radius:0 8px 8px 0;margin:16px 0}
+.callout.warn{border-left-color:var(--warn);background:var(--warn-soft)}
+.callout p{margin:4px 0}
+
+/* loop diagram */
+.flow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:18px 0 6px;position:relative}
+.step{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;box-shadow:var(--shadow);position:relative}
+.step .ph{font-size:11.5px;font-weight:700;color:var(--accent);letter-spacing:.06em;text-transform:uppercase}
+.step h4{margin:2px 0 4px;font-size:14.5px}
+.step p{margin:0;font-size:13px;color:var(--muted);line-height:1.45}
+.step.loop{border-color:var(--accent)}
+.step:not(:nth-child(4n)):not(:last-child)::after{content:"→";position:absolute;right:-10px;top:50%;transform:translate(50%,-50%);color:var(--muted);font-size:16px;z-index:1}
+.loopback{margin:0 0 18px;font-size:13px;color:var(--accent);display:flex;align-items:center;gap:8px}
+.loopback::before{content:"";flex:0 0 auto;width:60%;max-width:440px;height:14px;border:2px solid var(--accent);border-top:none;border-radius:0 0 10px 10px;margin-left:calc(100%/6*1 - 20px)}
+
+/* isolation zones */
+.zones{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}
+.zone{border:2px dashed var(--line);border-radius:12px;padding:14px;background:var(--surface)}
+.zone h4{margin:0 0 2px;font-size:15px}
+.zone .who{font-size:12.5px;color:var(--muted);margin-bottom:8px}
+.zone ul{margin:0;padding-left:18px;font-size:14px}
+.zone li{margin:3px 0}
+.zone.a{border-color:var(--warn)} .zone.b{border-color:var(--good)} .zone.c{border-color:var(--accent)}
+.sees{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-top:10px;color:var(--muted)}
+
+/* state machine */
+.states{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.state{font-family:ui-monospace,Menlo,monospace;font-size:12.5px;padding:4px 10px;border-radius:6px;background:var(--surface);border:1px solid var(--line)}
+.state.end{border-color:var(--good);color:var(--good)} .state.alt{border-color:var(--warn);color:var(--warn)}
+
+/* steps list */
+ol.how{counter-reset:s;list-style:none;padding:0;margin:12px 0}
+ol.how>li{counter-increment:s;position:relative;padding:0 0 18px 44px;border-left:2px solid var(--line);margin-left:14px}
+ol.how>li:last-child{border-left-color:transparent}
+ol.how>li::before{content:counter(s);position:absolute;left:-15px;top:-2px;width:28px;height:28px;border-radius:50%;background:var(--accent);color:var(--bg);font-weight:700;font-size:14px;display:grid;place-items:center}
+ol.how h4{margin:0 0 4px;font-size:15.5px}
+
+.decide{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin:14px 0}
+footer{margin-top:48px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:13.5px}
+.theme-btn{position:fixed;right:16px;bottom:16px;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 12px;font-size:13px;cursor:pointer;box-shadow:var(--shadow)}
+
+@media (max-width:960px){
+  .flow{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .step:nth-child(2n)::after{display:none}
+}
+@media (max-width:820px){
+  .wrap{grid-template-columns:minmax(0,1fr);gap:0}
+  nav.toc{position:static;max-height:none;padding:20px 0 0;display:flex;flex-wrap:wrap;gap:6px}
+  nav.toc h2{width:100%;margin-bottom:4px}
+  nav.toc a{border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:13px}
+  .zones{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:560px){
+  .flow{grid-template-columns:minmax(0,1fr)}
+  .step::after{display:none!important}
+  .lede{font-size:16.5px}
+}
+.yes{color:var(--good);font-weight:700}.no{color:var(--bad);font-weight:700}
+.cycle{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:14px 0;font-size:14px}
+.cycle .node{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
+.cycle .arr{color:var(--muted)}
+td.c{text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav class="toc" aria-label="Contents">
+  <h2>Contents</h2>
+  <a href="#glance">At a glance</a>
+  <a href="#flow">The workflow</a>
+  <a href="#isolation">Who sees what</a>
+  <a href="#review">The review</a>
+  <a href="#triage">Triage and report</a>
+  <a href="#respond">PR comments</a>
+  <a href="#exit">Exit and the author guide</a>
+  <a href="#meko">Meko: the guide's home</a>
+  <a href="#use">How to use it</a>
+  <a href="#verify">Verification</a>
+  <a href="#choices">Your call</a>
+</nav>
+
+<main>
+<header class="hero">
+  <div class="eyebrow">review-loop v0.4.0 · workflow and architecture</div>
+  <h1>Implement, review with fresh eyes, answer the PR, learn</h1>
+  <p class="lede">Your main thread writes the code. Unbiased reviewers who never see its reasoning apply your <code>branch-review</code> skill and <code>AGENTS.md</code> rules. The main thread fixes what is valid, explains what is not, and flags doubtful items as design differences. After you push, the same thread answers the PR comments. At the end, the exit step asks the main thread why it missed each valid finding, and revises its author guide so that class of miss does not recur. Only the main thread ever reads that guide.</p>
+  <div class="meta">
+    <span class="chip">local only</span><span class="chip">installed from ~/claude-review-loop</span>
+    <span class="chip">91 / 91 engine tests</span><span class="chip">local Meko 0.20261104.3</span><span class="chip">AgentK removed</span><span class="chip">2026-11-04</span>
+  </div>
+</header>
+
+<section id="glance">
+  <h2><span class="num">00</span>At a glance</h2>
+  <div class="cards">
+    <div class="card info"><h4>Reviewers stay unbiased</h4><p>They get only a generated brief: the diff range, your stated requirements, the rule files, and the team review skill. No author guide, no history, no MCP, no edits. Checked live.</p></div>
+    <div class="card good"><h4>Three outcomes per finding</h4><p>Valid: fix it and diagnose why it was missed. Not valid: keep the code and give the reason. Doubtful: keep the code and list it first in the report as a possible design difference.</p></div>
+    <div class="card warn"><h4>Same thread answers the PR</h4><p>After you push, <code>/review-loop:respond</code> ingests the open comments, triages them the same way, re-reviews any fixes, and drafts replies. It posts them only after your explicit yes.</p></div>
+    <div class="card info"><h4>The main thread gets better</h4><p><code>/review-loop:exit</code> turns each miss cause into an edit of a topic-organised author guide, per your <code>EXIT.md</code>, shown as a diff for your yes. A hook loads it into future main sessions only.</p></div>
+  </div>
+</section>
+
+<section id="flow">
+  <h2><span class="num">01</span>The workflow</h2>
+  <p class="sub">Eight steps. Steps 2 to 4 repeat until a round is clean, and step 7 reuses them for PR comments.</p>
+  <div class="flow" role="list">
+    <div class="step" role="listitem"><div class="ph">1 · Main thread</div><h4>Implement</h4><p>You and Claude write the code. The author guide is already in context.</p></div>
+    <div class="step loop" role="listitem"><div class="ph">2 · Fresh agents</div><h4>Review round</h4><p>Snapshot the tree, run checks, then spawn 2 reviewers that apply <code>branch-review</code> + <code>AGENTS.md</code>. Later rounds: 1 full + 1 delta.</p></div>
+    <div class="step loop" role="listitem"><div class="ph">3 · Main thread</div><h4>Triage</h4><p>Valid / not valid / doubtful. Calling a major not valid needs a neutral verifier.</p></div>
+    <div class="step loop" role="listitem"><div class="ph">4 · Main thread</div><h4>Fix + why missed</h4><p>Fix valid findings and record the cause while fresh: <code>fixed --cause … --why …</code></p></div>
+    <div class="step" role="listitem"><div class="ph">5 · New process</div><h4>Gate</h4><p>A separate <code>claude -p</code> reviews the identical tree, with no hooks, no MCP and no author guide.</p></div>
+    <div class="step" role="listitem"><div class="ph">6 · You</div><h4>Report, then push</h4><p>Design differences come first, then fixes and not-valid reasons. You commit and push.</p></div>
+    <div class="step loop" role="listitem"><div class="ph">7 · Same thread</div><h4>Respond to PR</h4><p>Ingest open comments, triage, fix, re-review, draft replies, and post on your yes.</p></div>
+    <div class="step" role="listitem"><div class="ph">8 · Main thread</div><h4>Exit</h4><p>Miss causes become a revision of the author guide, which feeds step 1 next time.</p></div>
+  </div>
+  <h3>The competence loop</h3>
+  <div class="cycle">
+    <span class="node">valid fix → why did I miss it?</span><span class="arr">→</span>
+    <span class="node">exit: revise guide per EXIT.md (diff, your yes)</span><span class="arr">→</span>
+    <span class="node">local Meko: datapack <code>review-loop guide yugabyte/yb-voyager</code> (+ local copy)</span><span class="arr">→</span>
+    <span class="node">SessionStart hook</span><span class="arr">→</span>
+    <span class="node">main thread only</span><span class="arr">→</span>
+    <span class="node">fewer bugs next time</span>
+  </div>
+  <p>When a guide item is clearly a team rule, the exit step proposes it as an <code>AGENTS.md</code> rule (it never edits the file itself). Once you add it, the pattern becomes a team rule that both authors and reviewers apply. The guide is private to the author; rules are shared and versioned.</p>
+</section>
+
+<section id="isolation">
+  <h2><span class="num">02</span>Who sees what</h2>
+  <div class="tbl"><table>
+    <tr><th>Information</th><th>Main thread</th><th>Reviewers + verifier</th><th>Gate process</th></tr>
+    <tr><td>Author guide and miss history</td><td class="c yes">yes</td><td class="c no">no</td><td class="c no">no</td></tr>
+    <tr><td>Author reasoning, ledger, earlier reports</td><td class="c yes">yes</td><td class="c no">no</td><td class="c no">no</td></tr>
+    <tr><td>Stated requirements (intent)</td><td class="c yes">yes</td><td class="c yes">yes</td><td class="c yes">yes</td></tr>
+    <tr><td><code>AGENTS.md</code> rules (<code>CLAUDE.md</code>, <code>BUGBOT.md</code> are symlinks)</td><td class="c yes">yes</td><td class="c yes">yes</td><td class="c yes">yes</td></tr>
+    <tr><td><code>branch-review</code> skill</td><td>—</td><td class="c yes">yes</td><td class="c yes">yes</td></tr>
+    <tr><td>PR comments</td><td class="c yes">yes</td><td class="c no">no</td><td class="c no">no</td></tr>
+    <tr><td>MCP tools (Meko, Slack, …)</td><td class="c yes">yes</td><td class="c no">blocked</td><td class="c no">blocked</td></tr>
+    <tr><td>Can edit the repository</td><td class="c yes">yes</td><td class="c no">no</td><td class="c no">no</td></tr>
+  </table></div>
+  <p><strong>How it is enforced.</strong> The author guide arrives through a SessionStart hook, which fetches it from the local Meko. Subagents do not run SessionStart, and the gate runs with all hooks disabled. Reviewer agents have <code>Edit</code>, <code>Write</code> and every <code>mcp__*</code> tool removed. Their prompt is one line, the path to a generated brief, and the brief and agent definitions tell them never to read <code>~/.claude/review-loop/</code> or the loop's state.</p>
+  <div class="callout warn"><p><strong>One soft spot:</strong> reviewers keep <code>Bash</code> so they can build, test and reproduce bugs. Nothing technically stops them from <code>cat</code>-ing the local copy or calling Meko over HTTP; only their instructions do (they have no Meko tools). In the live test, the reviewer did not have it in context.</p></div>
+</section>
+
+<section id="review">
+  <h2><span class="num">03</span>The review: your <code>branch-review</code> skill inside the loop</h2>
+  <p>Every reviewer brief, and the gate brief, tells the reviewer to invoke <code>branch-review</code> and apply its full method: the <code>AGENTS.md</code> walk from each changed file up to the root, the active rule checklist, the mechanical greps (<code>utils.ErrExit</code>, <code>time.Sleep</code> in tests, map reads without <code>ok</code>, <code>json:</code> tags), <code>go vet</code>, and all ten lenses. The brief adapts three things:</p>
+  <div class="tbl"><table>
+    <tr><th>branch-review says</th><th>In the loop</th><th>Why</th></tr>
+    <tr><td><code>git diff $(merge-base main HEAD)..HEAD</code></td><td><code>git diff &lt;base&gt; &lt;snapshot&gt;</code>; delta reviewers use <code>&lt;previous round&gt; &lt;snapshot&gt;</code></td><td>The snapshot includes uncommitted work, and delta reviewers check only the fixes.</td></tr>
+    <tr><td>Step 2 change summary, Steps 5–6 output, posting</td><td>Skipped; schema JSON instead</td><td>The engine needs structured findings to track and de-duplicate.</td></tr>
+    <tr><td><code>sem</code> entity diff</td><td>Skipped if not installed (it isn't here)</td><td>Only feeds the summary table.</td></tr>
+  </table></div>
+  <div class="tbl"><table>
+    <tr><th>branch-review class</th><th>Loop severity</th><th>Blocks convergence?</th></tr>
+    <tr><td>CRITICAL</td><td><span class="tag bad">blocker</span></td><td>Yes</td></tr>
+    <tr><td>WARNING (incl. any <code>AGENTS.md</code> violation)</td><td><span class="tag warn">major</span></td><td>Yes</td></tr>
+    <tr><td>SUGGESTION</td><td><span class="tag info">minor</span></td><td>Only with <code>--strict</code></td></tr>
+    <tr><td>QUESTION</td><td><span class="tag good">question</span></td><td>Never; you triage it like any other finding</td></tr>
+  </table></div>
+  <p>The engine also lists the governing rule files in each brief. It now finds <code>BUGBOT.md</code> and <code>.cursor/BUGBOT.md</code>, and counts symlinked copies once. In yb-voyager, <code>CLAUDE.md</code> and <code>.cursor/BUGBOT.md</code> both point at <code>AGENTS.md</code>. Deterministic checks for yb-voyager: <code>go build ./...</code> (about 30 s) and <code>go vet -tags unit ./cmd/... ./src/...</code> (about 5 s), both passing on <code>main</code>.</p>
+</section>
+
+<section id="triage">
+  <h2><span class="num">04</span>Triage and the report</h2>
+  <div class="tbl"><table>
+    <tr><th>Outcome</th><th>Code</th><th>Where it goes</th><th>Command</th></tr>
+    <tr><td><span class="tag good">Valid</span></td><td>Fixed</td><td>"Valid: fixed", with why it was missed</td><td><code>triage ID accept</code> → <code>fixed ID --note … --cause … --why …</code></td></tr>
+    <tr><td><span class="tag bad">Not valid</span></td><td>Kept</td><td>"Not valid: code kept as is", with the evidence</td><td><code>triage ID reject --note "&lt;evidence&gt;"</code> (major+: verifier first)</td></tr>
+    <tr><td><span class="tag warn">Doubtful</span></td><td>Kept</td><td><strong>Top of report</strong>: "Possible design differences", with options</td><td><code>triage ID doubtful --note "&lt;why&gt;"</code></td></tr>
+  </table></div>
+  <p>Doubtful and not-valid items never block the loop; it keeps iterating on the valid ones. The report reads in this order:</p>
+<pre><code># Review loop report: Converged
+## Possible design differences (code kept as is; your call)
+### D1. Why a separate cache layer here?  (R4-3, question - PR comment by @carol)
+- A. Keep the current design (no change) (recommended)
+- B. Change it as the reviewer suggests
+## Decisions you made
+## Valid: fixed
+- R1-1 [major] cmd/export.go:212 map read without ok - use comma-ok
+  - Missed because: covered-ignored - AGENTS.md says check ok; not applied in a new helper
+## Not valid: code kept as is (with reason)
+## Optional fixes · Deferred · Rounds · How to inspect</code></pre>
+</section>
+
+<section id="respond">
+  <h2><span class="num">05</span>After you push: answering PR comments</h2>
+  <ol class="how">
+    <li><h4><code>/review-loop:respond 3940</code> in the same thread</h4><p>Runs <code>rl.py reopen --pr 3940</code>, <code>snapshot --kind pr</code>, and <code>pr-ingest</code>, which reads unresolved threads, review bodies and PR comments through <code>gh</code>. It skips resolved threads, your own comments, and comments it has already seen.</p></li>
+    <li><h4>Triage each comment the same three ways</h4><p>It reads the whole thread first. Valid comments are fixed, and the miss is diagnosed (why did the loop and the author both miss it?). Not-valid ones get a reason, with a verifier for major ones. Doubtful ones become design differences.</p></li>
+    <li><h4>Fixes go back through fresh review</h4><p>Any change made for a comment triggers a normal round (full + delta) and the gate. PR-driven fixes are never exempt.</p></li>
+    <li><h4>Drafts, then your push, then your yes</h4><p><code>pr-replies</code> writes <code>.review-loop/pr-replies.md</code> and posts nothing. After you push and approve, <code>pr-replies --post</code> replies in each thread with an <code>[AI] </code> prefix. It refuses while fixes are uncommitted or unpushed, and it never resolves threads or approves.</p></li>
+  </ol>
+  <div class="tbl"><table>
+    <tr><th>Comment looks like</th><th>Severity</th><th>Seen on</th></tr>
+    <tr><td><code>[AI][Warning] **…**</code>, <code>[CRITICAL]</code>, <code>[AI][Suggestion]</code></td><td>major, blocker, minor</td><td>post-pr-review comments (e.g. PR 3936)</td></tr>
+    <tr><td><code>**minor** — …</code></td><td>minor</td><td>bot reviews (PR 3934, 3939)</td></tr>
+    <tr><td><code>High / Medium / Low Severity</code></td><td>major, minor, nit</td><td>Bugbot-style comments</td></tr>
+    <tr><td>Untagged, ends with "?"</td><td>question</td><td>human questions</td></tr>
+    <tr><td>Untagged inline request</td><td>major</td><td>human change requests</td></tr>
+  </table></div>
+  <p>The GitHub query and the parser were checked read-only against real yb-voyager PRs 3934, 3936 and 3939. Nothing was posted.</p>
+</section>
+
+<section id="exit">
+  <h2><span class="num">06</span>Exit: why did I miss it, and what must the guide say?</h2>
+  <p class="sub">The exit step does not dump lessons into a file. It diagnoses each miss, then edits one coherent instructions document.</p>
+  <h3>Step 1: the main thread diagnoses every valid finding</h3>
+  <p>It records one cause, ideally while fixing (when it still remembers writing the code), otherwise at exit. Before choosing, it searches the guide and the <code>AGENTS.md</code> chain for guidance that already covered the issue. "Covered" causes must quote that guidance.</p>
+  <div class="tbl"><table>
+    <tr><th>Cause</th><th>Meaning</th><th>What changes in the guide</th></tr>
+    <tr><td><span class="tag bad">not-covered</span></td><td>No guidance existed</td><td>Add guidance in the topic section where an author would look, saying when it applies and why.</td></tr>
+    <tr><td><span class="tag warn">covered-unclear</span></td><td>Guidance existed but was vague or buried</td><td>Rewrite that item so the trigger and action are unambiguous. No second item.</td></tr>
+    <tr><td><span class="tag warn">covered-ignored</span></td><td>Clear, but not applied</td><td>No new text. Move it to "Before you finish", tie it to the moment it matters, or make it a concrete check.</td></tr>
+    <tr><td><span class="tag info">context-gap</span></td><td>Needed code or system knowledge</td><td>Add a "Where to look" pointer.</td></tr>
+    <tr><td><span class="tag info">spec-gap</span></td><td>The requirement was unclear</td><td>Optionally a question under "Before you start".</td></tr>
+    <tr><td><span class="tag good">one-off</span></td><td>A slip</td><td>Nothing.</td></tr>
+    <tr><td colspan="2">A design difference you decided</td><td>Recorded under "Design decisions", with the reason.</td></tr>
+  </table></div>
+  <h3>Step 2: revise the author guide as a document</h3>
+  <p>One guide per repository, structured by your <code>EXIT.md</code>. It lives in the local Meko as a versioned document (<code>rl.py guide-pull</code> fetches the newest; <code>guide-push</code> saves a new version plus a history memory), with <code>~/.claude/review-loop/guides/yugabyte__yb-voyager.md</code> as its local copy. Several findings with one root cause become one edit, overlaps are merged, superseded text is deleted, and the guide stays within its size budget (about 7,000 characters). Finding ids, dates and counts never go in the body; they go to <code>…history.md</code>.</p>
+<pre><code>## Before you start
+- Which resume paths does this change touch? Ask if the spec is silent.
+## While writing
+### Error handling
+- When a helper returns `error`, return it with context (operation, object);
+  never `utils.ErrExit` inside it (root AGENTS.md, "Error handling").
+### Persistence and compatibility
+- Changing a `json:` tag on a metadb struct breaks resume of older runs;
+  add a migration or keep the old tag.
+## Where to look
+- Before changing import batching, read `importBatch` callers in cmd/import*.go:
+  retries reuse the batch object.
+## Design decisions
+- Schema lookups go through the cache layer: called per row (PR review, confirmed).
+## Before you finish
+- [ ] Every new map read of optional keys uses comma-ok.
+- [ ] No warn-and-continue on an unexpected state.</code></pre>
+  <h3>Step 3: you approve the diff</h3>
+  <p>The exit step prints the miss table and <code>diff -u</code> of the guide, and asks you to apply it, edit it first, or skip it. Only on "apply" does it save a new guide version in Meko and one history entry for the loop (never twice for the same loop). Team-wide items are proposed as exact <code>AGENTS.md</code> text; it never edits that file.</p>
+  <p><strong>Your instructions file</strong>, <code>~/.claude/review-loop/EXIT.md</code>, defines the sections (Before you start, While writing by topic, Where to look, Design decisions, Before you finish), the writing style, the budget, the approval rule, and the destinations. Edit it, and every later exit follows it.</p>
+</section>
+
+<section id="meko">
+  <h2><span class="num">07</span>Meko: the guide's home</h2>
+  <p class="sub">Offline Meko 0.20261104.3 is installed and running on this machine only (<code>127.0.0.1:7778</code>, data in <code>~/.meko</code>).</p>
+  <div class="tbl"><table>
+    <tr><th>What</th><th>Where it lives</th><th>Why</th></tr>
+    <tr><td>Author guide</td><td>Local Meko: datapack <code>review-loop guide yugabyte/yb-voyager</code>, document <code>author-guide.md</code>, one version per approved revision</td><td>One home that any agent connected to Meko can read; full version history. Reviewers have no Meko tools.</td></tr>
+    <tr><td>Why each finding was missed</td><td>Same datapack, one memory per loop (plus a local history file)</td><td>Searchable later ("what kinds of bugs do I keep writing?") without polluting the guide.</td></tr>
+    <tr><td>Local copy of the guide</td><td><code>~/.claude/review-loop/guides/…md</code></td><td>Refreshed on every read; used only if Meko is down, and the session is told so.</td></tr>
+    <tr><td>Rules: <code>AGENTS.md</code> (<code>CLAUDE.md</code>, <code>BUGBOT.md</code> are symlinks)</td><td>The repository</td><td>Versioned with each branch and needed by reviewers. Your main session already loads them through <code>CLAUDE.md</code>.</td></tr>
+  </table></div>
+  <h3>What the main thread reads before it writes code</h3>
+<pre><code>session start
+  ├─ CLAUDE.md → AGENTS.md          (repo rules, loaded by Claude Code)
+  └─ SessionStart hook → rl.py learnings-context
+        └─ local Meko: newest author-guide.md  (fallback: local copy)
+main thread writes code</code></pre>
+  <h3>Local-only settings</h3>
+  <ul>
+    <li><code>~/.meko/config.toml</code>: usage stats off (<code>[call_home] enabled = false</code>, confirmed "forced off by config.toml") and scheduled update checks off (<code>[update] channel = "off"</code>); run <code>meko update</code> by hand.</li>
+    <li>Web UI on this computer only (<code>http://127.0.0.1:7777</code>); no Meko Cloud link; memory extraction not enabled.</li>
+    <li><code>meko agent connect claude</code> added the local Meko MCP server to Claude Code, so your main session can also search it. Reviewers and the gate cannot.</li>
+    <li><code>~/.claude/review-loop/settings.json</code>: <code>{"guide_store": "meko"}</code>. Saving fails loudly if Meko is down, instead of silently writing only a file.</li>
+  </ul>
+</section>
+
+<section id="use">
+  <h2><span class="num">08</span>How to use it</h2>
+  <p><strong>Already set up for you:</strong> the plugin is installed from <code>~/claude-review-loop</code>; <code>~/.claude/review-loop/repos/yugabyte__yb-voyager.json</code> holds the private yb-voyager settings (<code>branch-review</code>, two Go checks, 4 rounds, Opus reviewers and gate, <code>[AI] </code> reply prefix); and <code>~/.claude/review-loop/EXIT.md</code> holds your exit instructions (how the author guide is structured and revised). Nothing was added to the yb-voyager repository.</p>
+<pre><code># 1. implement in a normal session in ~/yb-voyager
+# 2. harden it
+/review-loop:review-loop                 # branch + uncommitted vs main
+# 3. read the report; answer design differences; then push yourself
+# 4. once the PR has comments, in the same session
+/review-loop:respond 3940
+# 5. when the PR is done
+/review-loop:exit</code></pre>
+  <div class="tbl"><table>
+    <tr><th>Flag</th><th>Effect</th></tr>
+    <tr><td><code>--strict</code></td><td>Minor findings (SUGGESTION) also block.</td></tr>
+    <tr><td><code>--max-rounds N</code></td><td>Round cap (4 for yb-voyager).</td></tr>
+    <tr><td><code>--no-gate</code> / <code>--gate-model M</code></td><td>Skip the gate, or pick its model.</td></tr>
+    <tr><td><code>--review-skill NAME</code></td><td>Override the team review skill.</td></tr>
+    <tr><td><code>--checks "a;;b"</code></td><td>Exact check commands.</td></tr>
+  </table></div>
+</section>
+
+<section id="verify">
+  <h2><span class="num">09</span>Verification</h2>
+  <div class="tbl"><table>
+    <tr><th>Check</th><th>Result</th></tr>
+    <tr><td>Offline engine tests: config, rule-file de-duplication, branch-review brief, three outcomes, miss causes, report order, PR ingest/triage/replies, push guard, hook output, real comment formats</td><td><span class="tag good">91 / 91</span></td></tr>
+    <tr><td><code>claude plugin validate --strict</code> (marketplace and plugin)</td><td><span class="tag good">pass</span></td></tr>
+    <tr><td>Live: main session receives the guide through SessionStart</td><td><span class="tag good">yes</span> quoted the marker</td></tr>
+    <tr><td>Live: gate-style session (<code>disableAllHooks</code>, <code>--strict-mcp-config</code>)</td><td><span class="tag good">not received</span></td></tr>
+    <tr><td>Live: <code>fresh-reviewer</code> subagent spawned from a session holding the guide</td><td><span class="tag good">not received</span></td></tr>
+    <tr><td>Read-only GitHub query and parser on real PRs 3934, 3936 and 3939</td><td><span class="tag good">parsed</span></td></tr>
+    <tr><td>yb-voyager checks on <code>main</code></td><td><span class="tag good">pass</span> build 30 s, vet 5 s</td></tr>
+    <tr><td>Live Meko: save, version, newest-wins, local copy refresh, fallback when down, loud failure on save (<code>tests/test_meko_live.sh</code>)</td><td><span class="tag good">9 / 9</span></td></tr>
+    <tr><td>Live end to end: guide stored in Meko → new main session quotes it, with the Meko version as source</td><td><span class="tag good">yes</span></td></tr>
+    <tr><td>Live: reviewer subagent with the guide in Meko</td><td><span class="tag good">no guide, no MCP tools</span></td></tr>
+    <tr><td>Live: gate-style session with the guide in Meko</td><td><span class="tag good">not received</span></td></tr>
+    <tr><td>Full loop on a real yb-voyager branch</td><td><span class="tag warn">not run yet</span></td></tr>
+    <tr><td>Posting replies to GitHub</td><td><span class="tag warn">not run</span> by design; needs your push and yes</td></tr>
+  </table></div>
+</section>
+
+<section id="choices">
+  <h2><span class="num">10</span>Choices I made that are your call</h2>
+  <div class="tbl"><table>
+    <tr><th>Choice</th><th>Why</th><th>To change</th></tr>
+    <tr><td>Calling a major or blocker <em>not valid</em> still needs a neutral verifier</td><td>Your flow did not mention it, but it is the main guard against the author explaining real bugs away.</td><td>Tell me to drop it.</td></tr>
+    <tr><td>Untagged inline PR comments count as major</td><td>Human change requests deserve a decision, and calling them not valid needs the verifier.</td><td>Rule in <code>comment_severity</code>.</td></tr>
+    <tr><td>Replies start with <code>[AI] </code></td><td>Matches your <code>post-pr-review</code> convention.</td><td><code>reply_prefix</code> in settings.</td></tr>
+    <tr><td>Settings kept private, outside the yb-voyager repo</td><td>Avoids an untracked file being committed by accident.</td><td>Commit <code>.review-loop.json</code> if the team wants it.</td></tr>
+    <tr><td>Doubtful defaults to "keep the current design" as the recommended option</td><td>Matches "keep the code as is".</td><td>Pass <code>--option</code> / <code>--recommend</code>.</td></tr>
+  </table></div>
+  <footer>Local file generated 2026-11-04 from <code>~/claude-review-loop</code>; not published. Earlier Meko and AgentK analysis remains in git history (commit 85e322b).</footer>
+</section>
+</main>
+</div>
+<button class="theme-btn" type="button" id="themeBtn" aria-label="Toggle colour theme">Theme</button>
+<script>
+(function(){
+  var root=document.documentElement, key='rl-theme';
+  try{var saved=localStorage.getItem(key); if(saved) root.setAttribute('data-theme',saved);}catch(e){}
+  document.getElementById('themeBtn').addEventListener('click',function(){
+    var cur=root.getAttribute('data-theme');
+    var dark=cur?cur==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var next=dark?'light':'dark'; root.setAttribute('data-theme',next);
+    try{localStorage.setItem(key,next);}catch(e){}
+  });
+})();
+</script>
+</body>
+</html>

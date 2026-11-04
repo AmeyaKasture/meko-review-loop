@@ -1,0 +1,22 @@
+{"data": {"repository": {"pullRequest": {
+  "number": 7, "url": "https://github.com/acme/widget/pull/7", "author": {"login": "me"},
+  "reviewThreads": {"nodes": [
+    {"id": "T1", "isResolved": true, "isOutdated": false, "path": "lib.py", "line": 2, "originalLine": 2,
+     "comments": {"nodes": [{"databaseId": 101, "author": {"login": "alice"}, "body": "resolved already", "url": "u101"}]}},
+    {"id": "T2", "isResolved": false, "isOutdated": false, "path": "lib.py", "line": 2, "originalLine": 2,
+     "comments": {"nodes": [{"databaseId": 102, "author": {"login": "me"}, "body": "note to self", "url": "u102"}]}},
+    {"id": "T3", "isResolved": false, "isOutdated": false, "path": "lib.py", "line": 3, "originalLine": 3,
+     "comments": {"nodes": [{"databaseId": 103, "author": {"login": "ai-bot"}, "body": "[AI] [WARNING] `lib.py:3` - error is swallowed\nlog.Warn then continue hides a failed write.", "url": "u103"},
+                            {"databaseId": 104, "author": {"login": "me"}, "body": "looking", "url": "u104"}]}},
+    {"id": "T4", "isResolved": false, "isOutdated": false, "path": "lib.py", "line": 1, "originalLine": 1,
+     "comments": {"nodes": [{"databaseId": 105, "author": {"login": "bob"}, "body": "Rename this to load_all.", "url": "u105"}]}}
+  ]},
+  "reviews": {"nodes": [
+    {"databaseId": 201, "author": {"login": "bob"}, "body": "", "state": "APPROVED", "url": "u201"},
+    {"databaseId": 202, "author": {"login": "carol"}, "body": "Why a separate cache layer here?", "state": "COMMENTED", "url": "u202"}
+  ]},
+  "comments": {"nodes": [
+    {"databaseId": 301, "author": {"login": "me"}, "body": "ping", "url": "u301"},
+    {"databaseId": 302, "author": {"login": "dave"}, "body": "Please add a test for the empty input case.", "url": "u302"}
+  ]}
+}}}}

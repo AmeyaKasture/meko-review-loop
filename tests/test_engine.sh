@@ -47,7 +47,7 @@ printf -- '- JSON tags are a wire contract (kb:123)\n' > .review-loop/pitfalls.m
 b="$(jq -r .brief <<<"$("$RL" brief --mode full --name a)")"
 expect "root REVIEW.md listed" "$(cat "$b")" '`REVIEW.md`'
 expect "nested AGENTS.md listed" "$(cat "$b")" '`pkg/AGENTS.md`'
-expect "pitfalls injected into lens" "$(cat "$b")" "JSON tags are a wire contract"
+if grep -q "JSON tags are a wire contract" "$b"; then bad "author pitfalls kept out of reviewer brief"; else ok "author pitfalls kept out of reviewer brief"; fi
 expect "untracked file in snapshot" "$(git show --stat refs/review-loop/round-1)" "notes.txt"
 expect "set-intent refused after round 1" "$("$RL" set-intent --file "$W/i2" 2>&1 || true)" "only change before round 1"
 expect "status waits for reviewers" "$("$RL" status)" "NEXT: REVIEW"
@@ -130,5 +130,113 @@ for r in 1 2 3; do
   if [[ $r == 2 ]]; then expect "round-2 recurrence is a regression" "$("$RL" triage R2-1 duplicate --duplicate-of R1-1)" "regression"; "$RL" fixed R2-1 >/dev/null; fi
   if [[ $r == 3 ]]; then expect "second recurrence becomes a question" "$("$RL" triage R3-1 duplicate --duplicate-of R2-1)" "OSCILLATION"; fi
 done
+
+echo "private per-repo config, team review skill, symlinked rule files"
+export REVIEW_LOOP_HOME="$W/home"; export REVIEW_LOOP_GUIDE_STORE=file; mkdir -p "$REVIEW_LOOP_HOME/repos" "$REVIEW_LOOP_HOME/learnings"
+T2="$(mktemp -d)"; cd "$T2"; git init -q -b main; git config user.email t@t; git config user.name t
+git remote add origin https://github.com/acme/widget.git
+printf 'def load(m, k):\n    return m[k]\n' > lib.py
+printf '# Rules\nCheck ok on map reads.\n' > AGENTS.md; ln -s AGENTS.md CLAUDE.md; mkdir .cursor; ln -s ../AGENTS.md .cursor/BUGBOT.md
+mkdir -p .claude/skills/branch-review; printf -- '---\nname: branch-review\n---\nreview\n' > .claude/skills/branch-review/SKILL.md
+git add -A; git commit -qm init; git checkout -qb feat
+printf 'def load(m, k):\n    v = m[k]\n    return v\n' > lib.py; git commit -qam change
+echo '{"review_skill": "branch-review", "gate": false, "max_rounds": 3}' > "$REVIEW_LOOP_HOME/repos/acme__widget.json"
+out="$("$RL" init --session S9 --target feat --intent "Load values." 2>&1)"
+expect "private config found" "$out" "acme__widget.json"
+expect "review skill recorded" "$out" '"review_skill": "branch-review"'
+"$RL" snapshot >/dev/null; "$RL" run-checks >/dev/null
+b="$(jq -r .brief <<<"$("$RL" brief --mode full --name a)")"
+expect "brief names team review skill" "$(cat "$b")" 'This team reviews with the `branch-review` skill'
+expect "brief maps QUESTION severity" "$(cat "$b")" 'QUESTION -> `question`'
+expect "brief forbids reading author lessons" "$(cat "$b")" "~/.claude/review-loop/"
+if grep -q '`CLAUDE.md`\|BUGBOT' "$b"; then bad "symlinked rule files listed once"; else ok "symlinked rule files listed once"; fi
+
+echo "three outcomes, lessons, report order"
+cat > "$W/t2a.json" <<'J'
+{"reviewer":"a","round":1,"verdict":"issues_found","checks_run":[],"findings":[
+ {"severity":"major","confidence":"high","category":"guideline","file":"lib.py","line":2,"title":"map read without ok","claim":"KeyError","evidence":"AGENTS.md","failure_scenario":"load({}, 'x')"},
+ {"severity":"question","confidence":"medium","category":"maintainability","file":"lib.py","line":3,"title":"why a temp variable?","claim":"v is unused otherwise","evidence":"lib.py:3","failure_scenario":"n/a"}]}
+J
+"$RL" ingest "$W/t2a.json" >/dev/null
+expect "doubtful needs a reason" "$("$RL" triage R1-2 doubtful 2>&1 || true)" "needs --note"
+"$RL" triage R1-2 doubtful --note "Readability choice; the code alone cannot decide" >/dev/null
+expect "doubtful gets default options" "$(jq -r '.findings[] | select(.id=="R1-2") | .options[0]' .review-loop/state.json)" "Keep the current design"
+"$RL" triage R1-1 accept --note real >/dev/null
+expect "fixed records miss cause" "$("$RL" fixed R1-1 --note "use .get" --cause not-covered --why "No rule on optional keys" --lesson "Check ok on every map read of optional keys")" "marked fixed"
+expect "covered-* cause needs the rule it ignored" "$("$RL" miss R1-1 --cause covered-ignored --why x 2>&1 || true)" "needs --guide-ref"
+expect "next round after fix" "$("$RL" status)" "NEXT: NEXT_ROUND"
+"$RL" snapshot >/dev/null; "$RL" run-checks >/dev/null; "$RL" brief --mode delta --name b >/dev/null
+echo '{"reviewer":"b","round":2,"verdict":"clean","checks_run":[],"findings":[]}' > "$W/t2b.json"; "$RL" ingest "$W/t2b.json" >/dev/null
+expect "converged without gate" "$("$RL" status)" "NEXT: CONVERGED"
+rep="$(cat "$("$RL" report)")"
+d_line="$(grep -n 'Possible design differences' <<<"$rep" | cut -d: -f1)"; v_line="$(grep -n '## Valid: fixed' <<<"$rep" | cut -d: -f1)"
+if [[ -n "$d_line" && -n "$v_line" && "$d_line" -lt "$v_line" ]]; then ok "design differences lead the report"; else bad "design differences lead the report"; fi
+expect "report shows lesson" "$rep" "Lesson: Check ok on every map read"
+expect "report shows why it was missed" "$rep" "Missed because: not-covered"
+expect "report has not-valid section" "$rep" "## Not valid: code kept as is"
+"$RL" finish --status converged >/dev/null
+expect "init refuses to drop unsaved lessons" "$("$RL" init --session S10 2>&1 || true)" "lessons that were never saved"
+lj="$(cat "$("$RL" export-learnings)")"
+expect "export carries lesson" "$lj" "Check ok on every map read"
+expect "export names private author guide" "$lj" "$REVIEW_LOOP_HOME/guides/acme__widget.md"
+expect "export carries miss cause" "$lj" '"cause": "not-covered"'
+expect "export lists miss taxonomy" "$lj" '"covered-ignored"'
+expect "export lists design difference" "$lj" "why a temp variable?"
+
+echo "SessionStart learnings for the author session"
+expect "no learnings -> silent" "x$(echo "{\"cwd\":\"$T2\"}" | "$RL" learnings-context)" "x"
+mkdir -p "$REVIEW_LOOP_HOME/guides"; printf '## Correctness patterns\n### Check ok on map reads\n' > "$REVIEW_LOOP_HOME/guides/acme__widget.md"
+ctx="$(echo "{\"cwd\":\"$T2\"}" | "$RL" learnings-context)"
+expect "learnings injected as additionalContext" "$ctx" '"hookEventName": "SessionStart"'
+expect "learnings text present" "$ctx" "Check ok on map reads"
+
+echo "author guide store (file mode; Meko is covered by tests/test_meko_live.sh)"
+printf '## While writing\n### Errors\n- Return errors with context.\n' > "$W/g1.md"; printf -- '- R1-1 not-covered: added Errors item\n' > "$W/h1.md"
+gp="$("$RL" guide-push --file "$W/g1.md" --history-file "$W/h1.md" --marker "review-loop:acme/widget:aaa:bbb")"
+expect "guide saved locally in file mode" "$gp" '"saved": "file"'
+expect "guide stamped with marker" "$(head -1 "$REVIEW_LOOP_HOME/guides/acme__widget.md")" "review-loop:acme/widget:aaa:bbb"
+expect "history recorded" "$(cat "$REVIEW_LOOP_HOME/guides/acme__widget.history.md")" "not-covered: added Errors item"
+expect "same loop not recorded twice" "$("$RL" guide-push --file "$W/g1.md" --history-file "$W/h1.md" --marker "review-loop:acme/widget:aaa:bbb")" "marker already recorded"
+if [[ "$(grep -c 'author guide for' "$REVIEW_LOOP_HOME/guides/acme__widget.md")" == 1 ]]; then ok "stamp not duplicated on re-save"; else bad "stamp not duplicated on re-save"; fi
+expect "guide-pull reads local copy" "$("$RL" guide-pull)" '"source": "file"'
+expect "hook serves saved guide" "$(echo "{\"cwd\":\"$T2\"}" | "$RL" learnings-context)" "Return errors with context"
+
+echo "PR comments in the same thread"
+"$RL" reopen --pr 7 >/dev/null; "$RL" snapshot --kind pr >/dev/null
+pi="$("$RL" pr-ingest --from-file "$HERE/tests/fixtures/pr-comments.json")"
+expect "resolved and own comments skipped" "$pi" "4 open comment(s)"
+expect "tagged AI warning -> major" "$pi" "major    @ai-bot"
+expect "untagged inline -> major" "$pi" "major    @bob"
+expect "PR-level question -> question" "$pi" "question @carol"
+expect "re-ingest skips seen comments" "$("$RL" pr-ingest --from-file "$HERE/tests/fixtures/pr-comments.json")" "0 open comment(s)"
+ids=($(jq -r '.findings[] | select(.reviewer=="github") | .id' .review-loop/state.json))
+"$RL" triage "${ids[0]}" accept --note real >/dev/null
+expect "not-valid major PR comment needs verifier" "$("$RL" triage "${ids[1]}" reject --note naming 2>&1 || true)" "requires an independent verifier"
+"$RL" triage "${ids[1]}" reject --verifier not-real --note "load matches the module's naming convention" >/dev/null
+"$RL" triage "${ids[2]}" doubtful --note "The cache layer is a deliberate design choice" >/dev/null
+"$RL" triage "${ids[3]}" accept --note real >/dev/null
+expect "accepted PR comments must be applied" "$("$RL" status)" "NEXT: FIX"
+expect "fix without cause nudges for diagnosis" "$("$RL" fixed "${ids[0]}" "${ids[3]}" --note "error returned; test added")" "no --cause"
+expect "miss analysis after the fact" "$("$RL" miss "${ids[0]}" --cause covered-ignored --guide-ref "AGENTS.md: fail loudly" --why "Rule was clear; not applied in a new helper")" "missed because covered-ignored"
+expect "PR fixes go back through fresh review" "$("$RL" status)" "NEXT: NEXT_ROUND"
+dr="$("$RL" pr-replies)"; drafts="$(cat .review-loop/pr-replies.md)"
+expect "drafts posted nothing" "$dr" "Nothing was posted"
+expect "fixed reply drafted" "$drafts" "[AI] Fixed: error returned"
+expect "not-valid reply drafted" "$drafts" "Keeping this as is"
+expect "doubtful reply drafted" "$drafts" "Possible design difference"
+expect "post refused before push" "$("$RL" pr-replies --post 2>&1 || true)" "refusing to post"
+cd "$T"; rm -rf "$T2"
+
+echo "comment severity formats seen on real PRs"
+sev="$(python3 -c "
+import sys; sys.path.insert(0, '$(dirname "$RL")'); import rl
+for b in ['**minor** — breaks a rule', '[AI][Warning] **x**', '[AI][Suggestion] **y**', 'High Severity bug', 'Why here?', 'Rename it.']:
+    print(rl.comment_severity(b, True), rl.first_line(b))")"
+expect "bold severity prefix" "$sev" "minor breaks a rule"
+expect "[AI][Warning] tag" "$sev" "major x"
+expect "[AI][Suggestion] tag" "$sev" "minor y"
+expect "bugbot-style severity" "$sev" "major High Severity bug"
+expect "untagged question" "$sev" "question Why here?"
+expect "untagged inline request" "$sev" "major Rename it."
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

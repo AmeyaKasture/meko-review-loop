@@ -1,0 +1,20 @@
+{
+  "_comment": "yb-voyager. Installed privately as ~/.claude/review-loop/repos/yugabyte__yb-voyager.json so the team repo needs no new file. Commands come from the repo's AGENTS.md; reviewers also run gofmt, go vet on changed packages, and the other branch-review mechanical checks.",
+  "review_skill": "branch-review",
+  "checks": [
+    "cd yb-voyager && go build ./...",
+    "cd yb-voyager && go vet -tags unit ./cmd/... ./src/..."
+  ],
+  "max_rounds": 4,
+  "strict": false,
+  "gate": true,
+  "reviewer_model": "opus",
+  "gate_model": "opus",
+  "size_limits": {
+    "commits": 20,
+    "files": 60,
+    "lines": 3000
+  },
+  "reply_prefix": "[AI] ",
+  "exit_instructions": "~/.claude/review-loop/EXIT.md"
+}

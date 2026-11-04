@@ -2,7 +2,7 @@
 name: review-loop
 description: Iterative fresh-context review-and-fix loop for a PR, branch, or working tree. Spawns independent read-only reviewer agents (no author context) that run checks and try to reproduce defects, triages their findings in this thread with an anti-self-bias verifier, fixes what is real, and repeats until a round is clean. Finishes with a gate review in a completely new Claude session, then writes a report that asks the user about every judgement call.
 when_to_use: The user asks to iterate on a change until reviewers find nothing, to "loop review", "review until clean", "harden this PR", or to get independent fresh-eyes review with fixes applied. Also after finishing a substantial implementation when the user wants it verified before opening or merging a PR.
-argument-hint: "[PR number | PR URL | base ref] [--max-rounds N] [--strict] [--no-gate] [--gate-model MODEL] [--reviewer-model MODEL] [--checks \"cmd1;;cmd2\"]"
+argument-hint: "[PR number | PR URL | base ref] [--max-rounds N] [--strict] [--no-gate] [--gate-model MODEL] [--reviewer-model MODEL] [--review-skill NAME] [--checks \"cmd1;;cmd2\"]"
 disable-model-invocation: false
 ---
 
@@ -43,14 +43,17 @@ your first triage.
    rl.py init --session ${CLAUDE_SESSION_ID} --target "<pr or branch>" [--base <ref>] \
        --intent-file <file> [--max-rounds N] [--strict] [--no-gate] [--gate-model M] [--reviewer-model M]
    ```
-   Defaults come from `.review-loop.json` at the repo root when present
+   Defaults come from `.review-loop.json` at the repo root, or, when the repo
+   has none, from the private file `~/.claude/review-loop/repos/<owner>__<repo>.json`
    (keys: `checks`, `max_rounds`, `strict`, `gate`, `gate_model`,
-   `reviewer_model`, `size_limits`); flags override it.
+   `reviewer_model`, `size_limits`, `review_skill`, `exit_instructions`,
+   `reply_prefix`); flags override them. `review_skill` names the team review
+   skill (for example `branch-review`) that every reviewer must apply; the
+   brief tells them how.
    **Size gate:** if `init` prints `SIZE GATE`, ask the user whether to proceed
    before anything else (in a non-interactive run, stop and report instead).
-   **Optional Meko context:** if the `review-loop-meko-context` skill is
-   available, run it now; it can enrich the intent file and write
-   `.review-loop/pitfalls.md`, which briefs include automatically.
+   If `init` refuses because the previous loop has unsaved lessons, run the
+   `exit` skill for it first (or ask the user before using `--force`).
 4. **Choose checks.** `rl.py detect-checks`, then pick the fastest set that covers
    the touched code (typecheck, lint, targeted tests), and record it:
    `rl.py set-checks "cmd1;;cmd2"`. For very large repositories, scope tests to
@@ -94,17 +97,27 @@ your first triage.
 
 ## Phase 2: triage (you, applying the rubric)
 
-For each finding, decide accept, reject, defer, ask, or duplicate, and record
-it with `rl.py triage`. Use `rl.py show ID` for detail. To reject a major,
-blocker, or high-confidence finding, first spawn a `finding-verifier` agent
-(several in parallel if needed) with: the output of `rl.py show ID`, your
-rebuttal, the repo path, the snapshot SHA, and the round's scratch directory.
-Follow its verdict exactly as the rubric says.
+Sort every finding into one of three outcomes and record it with `rl.py triage`
+(`rl.py show ID` for detail):
+
+- **Valid** -> `accept`. You will fix it in Phase 3 and record a lesson.
+- **Not valid** -> `reject --note "<evidence>"`. The code stays as is; the
+  reason goes in the report. For a major, blocker, or reproduced minor, first
+  spawn a `finding-verifier` agent (several in parallel if needed) with the
+  output of `rl.py show ID`, your rebuttal, the repo path, the snapshot SHA,
+  and the round's scratch directory, and follow its verdict.
+- **Doubtful** -> `doubtful --note "<why>"`. The code stays as is; it goes to
+  the top of the report as a possible design difference.
+
+Use `duplicate` and `defer` only as the rubric describes.
 
 ## Phase 3: fix
 
 Fix every accepted finding (follow the rubric's fixing rules), then mark them
-with `rl.py fixed ID ... --note "..."`. Run the most relevant check locally as a
+with `rl.py fixed ID ... --note "<what changed>" --cause <cause> --why "<why I missed it>"`.
+Diagnose the miss now, while you remember writing the code (see the rubric's
+"Why did I miss it?"). The exit skill later turns these causes into edits of
+the author guide. Run the most relevant check locally as a
 sanity test. Then run `rl.py status` and follow `NEXT`:
 
 - `NEXT_ROUND` -> back to Phase 1.
@@ -143,12 +156,15 @@ sanity test. Then run `rl.py status` and follow `NEXT`:
    then apply the user's decisions. If that changes code, run one more `delta`
    round (Phase 1 with only a delta reviewer, no gate) unless the change is
    trivial, then regenerate the report. Finish with `rl.py finish --status done`.
-6. **Optional Meko publish:** if the `review-loop-meko-publish` skill is
-   available, offer it once. It publishes only with the user's explicit consent.
+6. Tell the user the two follow-ups: after they push and the PR gets comments,
+   `/review-loop:respond <PR>` answers them in this same thread; when the work
+   is done, `/review-loop:exit` revises the author guide from why each finding was missed.
 
 ## Invariants
 
 - Never commit, push, or post PR comments unless the user explicitly asks.
+- Never put lessons, earlier reports, or your reasoning into a reviewer brief
+  or prompt. Reviewers stay unbiased; lessons are for you only.
 - Never edit code between a clean round and the end, except to apply the
   user's answers in Phase 5.
 - Never paraphrase or pre-digest the change for a reviewer.

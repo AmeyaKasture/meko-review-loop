@@ -24,7 +24,7 @@
         "issues_found",
         "could_not_review"
       ],
-      "description": "clean = no finding at minor or above"
+      "description": "clean = no finding at minor or above (questions and nits allowed)"
     },
     "summary": {
       "type": "string",
@@ -85,7 +85,8 @@
               "blocker",
               "major",
               "minor",
-              "nit"
+              "nit",
+              "question"
             ]
           },
           "confidence": {
@@ -113,7 +114,8 @@
               "intent-gap",
               "guideline",
               "maintainability",
-              "style"
+              "style",
+              "review-comment"
             ]
           },
           "file": {
