@@ -1,7 +1,8 @@
-# claude-review-loop
+# meko-review-loop
 
 A Claude Code plugin for a simple observation: **a second AI with a fresh
 context finds bugs that the AI which wrote the code cannot see.**
+while trying to make the orchestrator learn inherent coding strategies using meko
 
 `review-loop` turns that observation into a bounded, repeatable workflow:
 
