@@ -164,7 +164,7 @@ expect "review skill recorded" "$out" '"review_skill": "branch-review"'
 b="$(jq -r .brief <<<"$("$RL" brief --mode full --name a)")"
 expect "brief names team review skill" "$(cat "$b")" 'This team reviews with the `branch-review` skill'
 expect "brief maps QUESTION severity" "$(cat "$b")" 'QUESTION -> `question`'
-expect "brief forbids reading author lessons" "$(cat "$b")" "~/.claude/review-loop/"
+expect "brief forbids reading author lessons" "$(cat "$b")" "~/.review-loop/"
 if grep -q '`CLAUDE.md`\|BUGBOT' "$b"; then bad "symlinked rule files listed once"; else ok "symlinked rule files listed once"; fi
 
 echo "three outcomes, lessons, report order"
@@ -314,5 +314,57 @@ cd "$T"; rm -rf "$T3"
 else
 echo "go not installed: skipping go scope tests"
 fi
+
+echo "headless reviewers through any agent CLI (fake custom agent)"
+HR="$(dirname "$RL")/headless-review.sh"
+T3="$(mktemp -d)"; cd "$T3"; git init -q -b main; git config user.email t@t; git config user.name t
+printf 'def mean(xs):\n    return sum(xs) / len(xs)\n' > m.py; git add -A; git commit -qm init; git checkout -qb f
+printf 'def mean(xs):\n    return sum(xs) / max(len(xs), 1)\n' > m.py; git commit -qam f
+cat > "$W/fake-agent.sh" <<'A'
+#!/usr/bin/env bash
+# $1 prompt file, $2 output path, $3 mode: file | stdout | verdict
+F='{"reviewer": "x", "round": 1, "verdict": "issues_found", "summary": "s", "findings": [{"severity": "major", "confidence": "high", "category": "correctness", "file": "m.py", "line": 2, "title": "Empty input returns 0", "claim": "mean([]) returns 0, not an error", "evidence": "m.py:2", "failure_scenario": "mean([])", "suggested_fix": "raise ValueError", "reproduced": true}]}'
+case "$3" in
+  file) grep -q "Write your result as JSON" "$1" && echo "$F" > "$2"; echo "done: 1 major";;
+  stdout) printf 'Here is my review.\n```json\n%s\n```\n' "$F";;
+  verdict) grep -q "The author's rebuttal" "$1" && printf 'It holds.\nVERDICT: NOT_REAL\n';;
+esac
+A
+chmod +x "$W/fake-agent.sh"
+echo "{\"checks\": [\"true\"], \"gate\": false, \"headless_command\": \"$W/fake-agent.sh {prompt_file} {output} file\"}" > .review-loop.json
+"$RL" init --session S3 --target f --intent "Mean of a list." >/dev/null; "$RL" snapshot >/dev/null; "$RL" run-checks >/dev/null
+hr="$("$HR" --agent custom --mode full --name r1a 2>&1)"
+expect "custom agent writes the findings file, runner ingests it" "$hr" "1 finding"
+echo "{\"checks\": [\"true\"], \"gate\": false, \"headless_command\": \"$W/fake-agent.sh {prompt_file} {output} stdout\"}" > .review-loop.json
+hr="$("$HR" --agent custom --mode full --name r1b 2>&1)"
+expect "JSON inside prose on stdout is extracted and ingested" "$hr" "1 finding"
+echo "{\"checks\": [\"true\"], \"gate\": false, \"gate_agent\": \"custom\", \"headless_command\": \"$W/fake-agent.sh {prompt_file} {output} verdict\"}" > .review-loop.json
+expect "verifier runs headless with the finding and rebuttal" "$("$HR" --mode verify --finding R1-1 2>&1)" "VERDICT: NOT_REAL"
+expect "gate_agent setting picks the agent" "$("$HR" --mode verify --finding R1-1 2>&1)" "via custom"
+expect "text guide output for agents without hooks" "x$(cd "$T3" && "$RL" learnings-context --text </dev/null)" "x"
+mkdir -p .agents/skills/team-review; printf -- '---\nname: team-review\n---\nx\n' > .agents/skills/team-review/SKILL.md
+echo '{"review_skill": "team-review"}' > .review-loop.json
+expect "review skill found in .agents/skills" "$("$RL" config)" ".agents/skills/team-review/SKILL.md"
+echo '{"review_skill": "docs/review.md"}' > .review-loop.json; mkdir -p docs; echo "# review" > docs/review.md
+expect "review skill may be a path to a Markdown file" "$("$RL" config)" "docs/review.md"
+cd "$T"; rm -rf "$T3"
+
+echo "install.sh for agents without plugins"
+"$HERE/install.sh" --agent codex --dir "$W/skills" >/dev/null
+expect "skills installed under namespaced names" "$(ls "$W/skills" | tr '\n' ' ')" "review-loop review-loop-exit review-loop-respond review-loop-setup"
+expect "SKILL.md name matches its directory" "$(head -3 "$W/skills/review-loop-setup/SKILL.md")" "name: review-loop-setup"
+if grep -rq 'CLAUDE_SKILL_DIR}/' "$W/skills"; then bad "skill paths written out"; else ok "skill paths written out"; fi
+expect "cross-skill reference follows the rename" "$(cat "$W/skills/review-loop-setup/SKILL.md")" "/../review-loop-exit/reference/EXIT.template.md"
+expect "verifier instructions installed for the headless runner" "$(ls "$W/skills/review-loop/agents")" "finding-verifier.md"
+expect "installed engine runs" "$(cd "$T" && "$W/skills/review-loop/scripts/rl.py" config 2>&1 || true)" '"repo":'
+
+echo "private directory: agent-neutral default, older location honoured"
+H="$W/fakehome"; mkdir -p "$H"
+rh() { HOME="$H" REVIEW_LOOP_HOME= python3 -c "import sys; sys.path.insert(0, '$(dirname "$RL")'); import rl; print(rl.RL_HOME)"; }
+expect "default is ~/.review-loop" "$(rh)" "$H/.review-loop"
+mkdir -p "$H/.claude/review-loop"
+expect "existing ~/.claude/review-loop keeps working" "$(rh)" "$H/.claude/review-loop"
+mkdir -p "$H/.review-loop"
+expect "~/.review-loop wins once it exists" "$(rh)" "$H/.review-loop"
 
 echo; echo "passed $pass, failed $fail"; [[ $fail -eq 0 ]]

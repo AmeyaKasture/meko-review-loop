@@ -1,16 +1,18 @@
 {
   "name": "review-loop",
   "version": "0.4.0",
-  "description": "Fresh-context review, fix, repeat until clean, with a separate-process gate, PR-comment responses, and private author lessons.",
+  "description": "Meko Review Loop for Claude Code: fresh-context review, fix, repeat until clean, with any agent CLI as reviewer or gate, PR-comment responses, and a private author guide (local files or Meko).",
   "author": {
     "name": "Ameya Kasture"
   },
   "license": "Apache-2.0",
   "keywords": [
+    "agent-agnostic",
     "code-review",
-    "review-loop",
-    "subagents",
+    "meko",
+    "pr",
     "quality",
-    "pr"
+    "review-loop",
+    "subagents"
   ]
 }

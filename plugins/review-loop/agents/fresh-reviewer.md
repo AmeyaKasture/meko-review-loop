@@ -34,7 +34,7 @@ Principles:
 - Do not ask questions in your reply. Record design or intent doubts as
   `question` findings, and assumptions in the `summary` field.
 - If the brief names a team review skill, apply it as the brief says.
-- Never read `~/.claude/review-loop/` or the loop's state and reports, and
+- Never read `~/.review-loop/` (or `~/.claude/review-loop/`) or the loop's state and reports, and
   never query a memory or notes service the author uses (memory CLIs, local
   memory servers, the author guide store). They hold the author's guide and
   history, which would bias you.

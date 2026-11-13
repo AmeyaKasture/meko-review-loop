@@ -3,6 +3,29 @@
 
 ## 0.4.0
 
+- Renamed the project Meko Review Loop (`meko-review-loop`; the Claude Code
+  marketplace is now `meko-review-loop`, so the plugin is
+  `review-loop@meko-review-loop`).
+- Agent-agnostic: `install.sh --agent claude|codex|cursor|gemini|agents`
+  installs the Claude Code plugin or copies the skills (namespaced
+  `review-loop-setup`, `-respond`, `-exit`) into another agent's skills
+  directory. Skill texts no longer assume Claude Code's tools.
+- `headless-review.sh` runs reviewers, the gate, and the finding verifier as
+  separate processes of any agent CLI (`claude`, `codex`, `gemini`, `cursor`,
+  or a `custom` command template), chosen by `reviewer_agent` / `gate_agent`.
+  Enables cross-vendor review. `fresh-session-review.sh` now wraps it.
+- `rl.py ingest` accepts findings inside an agent's JSON envelope or prose;
+  `rl.py brief --output file|structured`; `rl.py learnings-context --text` for
+  agents without a SessionStart hook.
+- Review skills are found in `.agents/skills`, `.claude/skills`,
+  `.cursor/skills`, `.codex/skills`, `.gemini/skills`, or by path.
+- Private files move to `~/.review-loop/`; an existing `~/.claude/review-loop/`
+  keeps working until the new directory exists.
+- Meko is back as a first-class, optional guide store
+  (`scripts/stores/meko_store.py`, plugged in through the store commands).
+  The setup skill checks for Meko, offers to install, start, and connect it
+  to the user's agent, and configures it. `tests/test_meko_live.sh` tests it
+  against a running Meko.
 - Three triage outcomes: valid (fix it and diagnose the miss), not valid (keep the
   code, reason in the report), and doubtful (keep the code, listed first in
   the report as a possible design difference). `reject`, `doubtful`, and
@@ -12,7 +35,7 @@
   Severity `question` maps the skill's QUESTION class and never blocks.
 - Rule files: `BUGBOT.md` and `.cursor/BUGBOT.md` are discovered, and
   symlinked copies (`CLAUDE.md` -> `AGENTS.md`) are listed once.
-- Private settings in `~/.claude/review-loop/repos/<owner>__<repo>.json`.
+- Private settings in `~/.review-loop/repos/<owner>__<repo>.json`.
 - `respond` skill and `reopen`, `pr-ingest`, `pr-replies` commands: answer PR
   comments in the same thread; fixes go back through fresh review; replies
   are drafted locally and posted only after a push and explicit approval.
@@ -20,13 +43,13 @@
   the author session missed each valid finding (`not-covered`,
   `covered-unclear`, `covered-ignored`, `context-gap`, `spec-gap`, `one-off`).
 - `exit` skill: turns the causes into a revision of the author guide
-  (`~/.claude/review-loop/guides/<owner>__<repo>.md`), a semantic document
+  (`~/.review-loop/guides/<owner>__<repo>.md`), a semantic document
   edited as a whole per the user's `EXIT.md`, shown as a diff and applied on
   approval, with a separate history file. A SessionStart hook loads the
   guide into future author sessions only.
 - Author guide store: the guide is a local file by default. An external,
   versioned store can be attached with two shell commands
-  (`guide_pull_cmd`, `guide_push_cmd` in `~/.claude/review-loop/settings.json`);
+  (`guide_pull_cmd`, `guide_push_cmd` in `~/.review-loop/settings.json`);
   `rl.py guide-pull` and `guide-push` use it with the local file as cache and
   fallback (`guide_store`: `auto`, `command`, or `file`).
   `examples/guide-store/git-store.sh` is a store backed by a private git

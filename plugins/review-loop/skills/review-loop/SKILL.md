@@ -1,6 +1,6 @@
 ---
 name: review-loop
-description: Iterative fresh-context review-and-fix loop for a PR, branch, or working tree. Spawns independent read-only reviewer agents (no author context) that run checks and try to reproduce defects, triages their findings in this thread with an anti-self-bias verifier, fixes what is real, and repeats until a round is clean. Finishes with a gate review in a completely new Claude session, then writes a report that asks the user about every judgement call.
+description: Iterative fresh-context review-and-fix loop for a PR, branch, or working tree. Spawns independent read-only reviewer agents (no author context) that run checks and try to reproduce defects, triages their findings in this thread with an anti-self-bias verifier, fixes what is real, and repeats until a round is clean. Finishes with a gate review in a completely new agent process (any CLI agent, optionally another vendor's), then writes a report that asks the user about every judgement call.
 when_to_use: The user asks to iterate on a change until reviewers find nothing, to "loop review", "review until clean", "harden this PR", or to get independent fresh-eyes review with fixes applied. Also after finishing a substantial implementation when the user wants it verified before opening or merging a PR.
 argument-hint: "[PR number | PR URL | base ref] [--max-rounds N] [--strict] [--no-gate] [--gate-model MODEL] [--reviewer-model MODEL] [--review-skill NAME] [--checks \"cmd1;;cmd2\"]"
 disable-model-invocation: false
@@ -43,10 +43,12 @@ your first triage.
    rl.py init --session ${CLAUDE_SESSION_ID} --target "<pr or branch>" [--base <ref>] \
        --intent-file <file> [--max-rounds N] [--strict] [--no-gate] [--gate-model M] [--reviewer-model M]
    ```
+   (`--session` takes your agent's session id; in Claude Code that is
+   `${CLAUDE_SESSION_ID}`. Omit it if your agent has none.)
    Defaults come from `.review-loop.json` at the repo root, or, when the repo
-   has none, from the private file `~/.claude/review-loop/repos/<owner>__<repo>.json`
+   has none, from the private file `~/.review-loop/repos/<owner>__<repo>.json`
    (keys: `checks`, `max_rounds`, `strict`, `gate`, `gate_model`,
-   `reviewer_model`, `size_limits`, `review_skill`, `exit_instructions`,
+   `reviewer_model`, `reviewer_agent`, `gate_agent`, `size_limits`, `review_skill`, `exit_instructions`,
    `reply_prefix`); flags override them. `review_skill` names the team review
    skill (for example `branch-review`) that every reviewer must apply; the
    brief tells them how.
@@ -75,7 +77,7 @@ your first triage.
    the package list reaches reviewers, never your note.
 1. `rl.py snapshot` (creates `refs/review-loop/round-N`; the user's index and
    HEAD are untouched).
-2. `rl.py run-checks` (use `run_in_background` if the suite is slow).
+2. `rl.py run-checks` (run it in the background if the suite is slow).
 3. Generate briefs. Each prints a brief path:
    - **Round 1:** two `full` reviewers with different lenses, for example
      ```
@@ -86,20 +88,29 @@ your first triage.
      a third reviewer, or split the lenses by subsystem.
    - **Later rounds (dual path):** one fresh `full` reviewer and one `delta`
      reviewer that scrutinises only the fixes since the previous round.
-4. **Spawn all reviewers in ONE message, in parallel**, with
-   `subagent_type: "fresh-reviewer"` (installed as a plugin it may be listed as
-   `review-loop:fresh-reviewer`; use whichever name the Agent tool lists). If
-   state has a `reviewer_model`, pass it as the Agent `model`. The prompt must be exactly:
-   `Read and follow the brief at <brief path>.`
+4. **Start all reviewers at once, in parallel.** Each reviewer must have a
+   fresh context and no edit rights. Pick the first that applies:
+   - **Settings name a `reviewer_agent` CLI** (`claude`, `codex`, `gemini`,
+     `cursor`, `custom`), or your agent has no subagents: run each reviewer
+     as a separate process, in the background:
+     ```
+     bash ${CLAUDE_SKILL_DIR}/scripts/headless-review.sh --mode full --name r1a --agent <cli> --lens "..."
+     ```
+     It writes the brief, runs the reviewer, and ingests its findings. A
+     different vendor's model than yours is a strength, not a problem.
+   - **Your agent has subagents:** spawn one per brief. In Claude Code use
+     the `fresh-reviewer` agent type (listed as `review-loop:fresh-reviewer`
+     when installed as a plugin), with `reviewer_model` as its model; in other
+     agents use a read-only subagent with no MCP or memory tools. The prompt
+     must be exactly: `Read and follow the brief at <brief path>.`
    Add nothing else: no summaries, no previous findings, no hints about what
-   you fixed. If the `fresh-reviewer` agent type is unavailable, use
-   `general-purpose` with the same one-line prompt plus "Do not modify any
-   repository file, and do not call any mcp__ tool."
+   you fixed.
 5. When they return: `rl.py verify-tree` (if it reports changes, inspect and
-   restore before continuing), then `rl.py ingest <output json>` for each.
+   restore before continuing), then `rl.py ingest <output json>` for each
+   subagent reviewer (the headless script ingests on its own).
    If an ingest is rejected as invalid, send the printed errors to that same
-   reviewer with `SendMessage` and ask it to rewrite its file, then ingest
-   again. Never skip a reviewer silently: the next `snapshot` refuses while any
+   reviewer and ask it to rewrite its file (or re-run the headless reviewer),
+   then ingest again. Never skip a reviewer silently: the next `snapshot` refuses while any
    reviewer is unaccounted for. If a reviewer truly cannot be recovered, record
    it with `rl.py drop-reviewer NAME --reason "..."`.
 
@@ -111,9 +122,11 @@ Sort every finding into one of three outcomes and record it with `rl.py triage`
 - **Valid** -> `accept`. You will fix it in Phase 3 and record a lesson.
 - **Not valid** -> `reject --note "<evidence>"`. The code stays as is; the
   reason goes in the report. For a major, blocker, or reproduced minor, first
-  spawn a `finding-verifier` agent (several in parallel if needed) with the
-  output of `rl.py show ID`, your rebuttal, the repo path, the snapshot SHA,
-  and the round's scratch directory, and follow its verdict.
+  get a neutral verdict and follow it. Write your rebuttal to a file, then run
+  `bash ${CLAUDE_SKILL_DIR}/scripts/headless-review.sh --mode verify --finding ID --rebuttal-file <file>`
+  (several in parallel if needed). In Claude Code you may instead spawn the
+  `finding-verifier` agent with the output of `rl.py show ID`, your rebuttal,
+  the repo path, the snapshot SHA, and the round's scratch directory.
 - **Doubtful** -> `doubtful --note "<why>"`. The code stays as is; it goes to
   the top of the report as a possible design difference.
 
@@ -138,14 +151,14 @@ sanity test. Then run `rl.py status` and follow `NEXT`:
 ## Phase 4: gate review in a completely new session
 
 1. `rl.py snapshot --kind gate` and `rl.py run-checks`.
-2. Run, with `run_in_background: true`, and wait for its completion notice:
+2. Run in the background and wait for it to finish:
    ```
-   bash ${CLAUDE_SKILL_DIR}/scripts/fresh-session-review.sh [--model <gate model>]
+   bash ${CLAUDE_SKILL_DIR}/scripts/headless-review.sh --mode gate [--agent <cli>] [--model <gate model>]
    ```
-   This starts a separate `claude -p` process with no session history and a
-   schema-enforced JSON output, then ingests the result. Prefer a different
-   model from the one that wrote the code (model diversity catches different
-   bugs).
+   This starts a separate agent process (`gate_agent` in the settings, else
+   `claude`) with no session history, then ingests the result. Prefer a
+   different model, or a different vendor, from the one that wrote the code:
+   model diversity catches different bugs.
 3. Triage as in Phase 2. If anything blocking is accepted, fix it (Phase 3);
    `status` will then send you back to Phase 1.
 
@@ -156,9 +169,10 @@ sanity test. Then run `rl.py status` and follow `NEXT`:
 2. `rl.py report` prints the report path. Read it.
 3. Tell the user, briefly: the outcome, rounds run, what was fixed, what was
    rejected and why, and the report path.
-4. If there are questions and the session is interactive, ask them with
-   `AskUserQuestion` (up to four per call; each option label is a short
-   action, the recommended option first with "(Recommended)"). Include the
+4. If there are questions and the session is interactive, ask them (in
+   Claude Code with `AskUserQuestion`, up to four per call; elsewhere as a
+   numbered list of options). Each option is a short action, the recommended
+   option first with "(Recommended)". Include the
    optional minor fixes as one multi-select question if any exist.
 5. Record each answer with `rl.py answer ID <letter or free text> [--note ...]`,
    then apply the user's decisions. If that changes code, run one more `delta`
@@ -181,6 +195,6 @@ sanity test. Then run `rl.py status` and follow `NEXT`:
   blocking threshold (major by default, minor with `--strict`).
 - If the user interrupts or wants to stop: `rl.py finish --status cancelled`,
   then `rl.py report`.
-- The plugin's Stop hook will push you back into the loop while status is
+- In Claude Code, the plugin's Stop hook will push you back into the loop while status is
   `running`, at most three times per round. Do not fight it; follow its
   `Next step`.

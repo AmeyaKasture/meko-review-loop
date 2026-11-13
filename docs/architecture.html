@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>review-loop Workflow</title>
-<meta name="description" content="The review-loop workflow: fresh-context review with your team review skill, three-outcome triage, PR comment responses, and a private author guide revised from why each bug was missed.">
+<title>Meko Review Loop</title>
+<meta name="description" content="The Meko Review Loop workflow, for any coding agent: fresh-context review with your team review skill, three-outcome triage, PR comment responses, and a private author guide revised from why each bug was missed.">
 <style>
 :root{
   --bg:#f7f6f2; --surface:#ffffff; --surface-2:#efede6; --ink:#1d1c1a; --muted:#5f5c55;
@@ -150,11 +150,11 @@ td.c{text-align:center}
 
 <main>
 <header class="hero">
-  <div class="eyebrow">review-loop v0.4.0 · workflow and architecture</div>
+  <div class="eyebrow">Meko Review Loop v0.4.0 · workflow and architecture</div>
   <h1>Implement, review with fresh eyes, answer the PR, learn</h1>
-  <p class="lede">Your main thread writes the code. Unbiased reviewers who never see its reasoning apply your team's review skill and the repository's rule files. The main thread fixes what is valid, explains what is not, and flags doubtful items as design differences. After you push, the same thread answers the PR comments. At the end, the exit step asks the main thread why it missed each valid finding, and revises its author guide so that class of miss does not recur. Only the main thread ever reads that guide.</p>
+  <p class="lede">Works with Claude Code, Codex, Cursor, Gemini CLI, or any agent that can follow a Markdown skill and run shell commands. Your main thread writes the code. Unbiased reviewers who never see its reasoning apply your team's review skill and the repository's rule files. The main thread fixes what is valid, explains what is not, and flags doubtful items as design differences. After you push, the same thread answers the PR comments. At the end, the exit step asks the main thread why it missed each valid finding, and revises its author guide so that class of miss does not recur. Only the main thread ever reads that guide.</p>
   <div class="meta">
-    <span class="chip">runs locally</span><span class="chip">Claude Code plugin</span><span class="chip">no model calls in tests</span><span class="chip">Apache-2.0</span>
+    <span class="chip">runs locally</span><span class="chip">any coding agent</span><span class="chip">optional Meko memory</span><span class="chip">no model calls in tests</span><span class="chip">Apache-2.0</span>
   </div>
 </header>
 
@@ -170,27 +170,28 @@ td.c{text-align:center}
 
 <section id="setup">
   <h2><span class="num">01</span>Setup</h2>
-  <p class="sub">One pasted sentence installs the plugin and configures the repository. Nothing is committed.</p>
-<pre><code>Set up review-loop for this repository by following
-https://github.com/AmeyaKasture/claude-review-loop/blob/main/docs/SETUP.md</code></pre>
+  <p class="sub">One pasted sentence, in any agent, installs Meko Review Loop and configures the repository. Nothing is committed.</p>
+<pre><code>Set up Meko Review Loop for this repository by following
+https://github.com/AmeyaKasture/meko-review-loop/blob/main/docs/SETUP.md</code></pre>
   <ol class="how">
-    <li><h4>Install</h4><p><code>claude plugin marketplace add</code> and <code>claude plugin install review-loop@review-loop</code>, at user or project scope. Skipped if already installed.</p></li>
+    <li><h4>Install</h4><p><code>install.sh --agent claude|codex|cursor|gemini|agents</code>: the plugin for Claude Code, or the skills copied into the agent's skills directory. Skipped if already installed.</p></li>
     <li><h4>Survey (read-only)</h4><p>Build manifests, CI jobs, contributor docs, rule files (<code>AGENTS.md</code>, <code>CLAUDE.md</code>, <code>REVIEW.md</code>, <code>BUGBOT.md</code>), existing review skills, and the typical size of merged changes.</p></li>
-    <li><h4>Draft and ask once</h4><p>Two to five fast checks that mirror CI, size limits a little above the usual change, and, if the repository has none, a review skill filled in from a template. You choose: private or committed settings, where the skill goes, models and gate, and the guide store.</p></li>
+    <li><h4>Draft and ask once</h4><p>Two to five fast checks that mirror CI, size limits a little above the usual change, and, if the repository has none, a review skill filled in from a template. You choose: private or committed settings, where the skill goes, which agents and models review, and where the author guide lives.</p></li>
+    <li><h4>Meko</h4><p>If Meko is not installed or not running, it asks whether to install, start, and connect it to your agent; on yes it does so and points the author guide at it.</p></li>
     <li><h4>Write and prove</h4><p>Files are written (with a diff first if one exists), then <code>rl.py config --probe</code> runs each check once. A check that cannot run in this environment is replaced before it can block a loop.</p></li>
   </ol>
-  <p>Once the plugin is installed, <code>/review-loop:setup</code> repeats steps 2 to 4 in any repository.</p>
+  <p>Once installed, the setup skill (<code>/review-loop:setup</code> in Claude Code, <code>review-loop-setup</code> elsewhere) repeats the later steps in any repository.</p>
 </section>
 
 <section id="flow">
   <h2><span class="num">02</span>The workflow</h2>
   <p class="sub">Eight steps. Steps 2 to 4 repeat until a round is clean, and step 7 reuses them for PR comments.</p>
   <div class="flow" role="list">
-    <div class="step" role="listitem"><div class="ph">1 · Main thread</div><h4>Implement</h4><p>You and Claude write the code. The author guide is already in context.</p></div>
+    <div class="step" role="listitem"><div class="ph">1 · Main thread</div><h4>Implement</h4><p>You and your agent write the code. The author guide is already in context.</p></div>
     <div class="step loop" role="listitem"><div class="ph">2 · Fresh agents</div><h4>Review round</h4><p>Snapshot the tree, run checks, then spawn 2 reviewers that apply the review skill and rule files. Later rounds: 1 full + 1 delta.</p></div>
     <div class="step loop" role="listitem"><div class="ph">3 · Main thread</div><h4>Triage</h4><p>Valid / not valid / doubtful. Calling a major not valid needs a neutral verifier.</p></div>
     <div class="step loop" role="listitem"><div class="ph">4 · Main thread</div><h4>Fix + why missed</h4><p>Fix valid findings and record the cause while fresh: <code>fixed --cause … --why …</code></p></div>
-    <div class="step" role="listitem"><div class="ph">5 · New process</div><h4>Gate</h4><p>A separate <code>claude -p</code> reviews the identical tree, with no hooks, no MCP and no author guide.</p></div>
+    <div class="step" role="listitem"><div class="ph">5 · New process</div><h4>Gate</h4><p>A separate agent process (any CLI, ideally another vendor's model) reviews the identical tree, with no author guide.</p></div>
     <div class="step" role="listitem"><div class="ph">6 · You</div><h4>Report, then push</h4><p>Design differences come first, then fixes and not-valid reasons. You commit and push.</p></div>
     <div class="step loop" role="listitem"><div class="ph">7 · Same thread</div><h4>Respond to PR</h4><p>Ingest open comments, triage, fix, re-review, draft replies, and post on your yes.</p></div>
     <div class="step" role="listitem"><div class="ph">8 · Main thread</div><h4>Exit</h4><p>Miss causes become a revision of the author guide, which feeds step 1 next time.</p></div>
@@ -199,8 +200,8 @@ https://github.com/AmeyaKasture/claude-review-loop/blob/main/docs/SETUP.md</code
   <div class="cycle">
     <span class="node">valid fix → why did I miss it?</span><span class="arr">→</span>
     <span class="node">exit: revise guide per EXIT.md (diff, your yes)</span><span class="arr">→</span>
-    <span class="node">guide store: <code>~/.claude/review-loop/guides/&lt;owner&gt;__&lt;repo&gt;.md</code></span><span class="arr">→</span>
-    <span class="node">SessionStart hook</span><span class="arr">→</span>
+    <span class="node">Meko datapack, or <code>~/.review-loop/guides/&lt;owner&gt;__&lt;repo&gt;.md</code></span><span class="arr">→</span>
+    <span class="node">session start</span><span class="arr">→</span>
     <span class="node">main thread only</span><span class="arr">→</span>
     <span class="node">fewer bugs next time</span>
   </div>
@@ -220,7 +221,7 @@ https://github.com/AmeyaKasture/claude-review-loop/blob/main/docs/SETUP.md</code
     <tr><td>MCP tools (memory servers, chat, …)</td><td class="c yes">yes</td><td class="c no">blocked</td><td class="c no">blocked</td></tr>
     <tr><td>Can edit the repository</td><td class="c yes">yes</td><td class="c no">no</td><td class="c no">no</td></tr>
   </table></div>
-  <p><strong>How it is enforced.</strong> The author guide arrives through a SessionStart hook. Subagents do not run SessionStart, and the gate runs with all hooks disabled. Reviewer agents have <code>Edit</code>, <code>Write</code> and every <code>mcp__*</code> tool removed. Their prompt is one line, the path to a generated brief, and the brief and agent definitions tell them never to read <code>~/.claude/review-loop/</code>, the loop's state, or any memory service.</p>
+  <p><strong>How it is enforced.</strong> The author guide reaches only the author session (in Claude Code through a SessionStart hook, which subagents do not run). Headless reviewers and the gate start as new processes with only the brief; the <code>claude</code> preset also disables hooks and MCP. Reviewer agents have <code>Edit</code>, <code>Write</code> and every <code>mcp__*</code> tool removed. Their prompt is one line, the path to a generated brief, and the brief and agent definitions tell them never to read <code>~/.review-loop/</code>, the loop's state, or any memory service.</p>
   <div class="callout warn"><p><strong>One soft spot:</strong> reviewers keep <code>Bash</code> so they can build, test and reproduce bugs. Nothing technically stops them from <code>cat</code>-ing the local guide or calling a store's command line; only their instructions do.</p></div>
 </section>
 
@@ -319,20 +320,22 @@ https://github.com/AmeyaKasture/claude-review-loop/blob/main/docs/SETUP.md</code
 - [ ] No warn-and-continue on an unexpected state.</code></pre>
   <h3>Step 3: you approve the diff</h3>
   <p>The exit step prints the miss table and <code>diff -u</code> of the guide, and asks you to apply it, edit it first, or skip it. Only on "apply" does it save a new guide version and one history entry for the loop (never twice for the same loop). Team-wide items are proposed as exact <code>AGENTS.md</code> text; it never edits that file.</p>
-  <p><strong>Your instructions file</strong>, <code>~/.claude/review-loop/EXIT.md</code>, defines the sections (Before you start, While writing by topic, Where to look, Design decisions, Before you finish), the writing style, the budget, the approval rule, and the destinations. Edit it, and every later exit follows it.</p>
+  <p><strong>Your instructions file</strong>, <code>~/.review-loop/EXIT.md</code>, defines the sections (Before you start, While writing by topic, Where to look, Design decisions, Before you finish), the writing style, the budget, the approval rule, and the destinations. Edit it, and every later exit follows it.</p>
 </section>
 
 <section id="store">
   <h2><span class="num">08</span>Where the guide lives</h2>
   <div class="tbl"><table>
     <tr><th>What</th><th>Where it lives</th><th>Why</th></tr>
-    <tr><td>Author guide</td><td><code>~/.claude/review-loop/guides/&lt;owner&gt;__&lt;repo&gt;.md</code></td><td>Private to you, outside the repository, so reviewers and teammates never see it.</td></tr>
+    <tr><td>Author guide</td><td><code>~/.review-loop/guides/&lt;owner&gt;__&lt;repo&gt;.md</code></td><td>Private to you, outside the repository, so reviewers and teammates never see it.</td></tr>
     <tr><td>Why each finding was missed</td><td><code>…/&lt;owner&gt;__&lt;repo&gt;.history.md</code></td><td>Searchable later ("what kinds of bugs do I keep writing?") without polluting the guide.</td></tr>
-    <tr><td>Cross-repository guidance</td><td><code>~/.claude/review-loop/guides/_global.md</code></td><td>Habits that apply everywhere.</td></tr>
+    <tr><td>Cross-repository guidance</td><td><code>~/.review-loop/guides/_global.md</code></td><td>Habits that apply everywhere.</td></tr>
     <tr><td>Rules: <code>AGENTS.md</code> and friends</td><td>The repository</td><td>Versioned with each branch and needed by reviewers.</td></tr>
   </table></div>
-  <h3>Optional external store</h3>
-  <p>To keep every version elsewhere (a private git repository, a synced folder, a notes or memory service), set two commands in <code>~/.claude/review-loop/settings.json</code>. The local file becomes a cache and the fallback when the store is unreachable.</p>
+  <h3>Meko</h3>
+  <p><a href="https://mekodata.ai">Meko</a>, a local, offline memory engine, keeps each repository's guide in a datapack (<code>review-loop guide &lt;owner&gt;/&lt;repo&gt;</code>): every approved revision is a version of <code>author-guide.md</code>, and each loop's miss history is a searchable memory. Any agent connected to Meko (Claude Code, Codex, Cursor, OpenCode, Kiro) can recall it; reviewers are never connected. The setup skill installs and connects it on request, and <code>scripts/stores/meko_store.py</code> plugs it in through the store commands below.</p>
+  <h3>Any other store</h3>
+  <p>To keep every version elsewhere (a private git repository, a synced folder, another memory service), set two commands in <code>~/.review-loop/settings.json</code>. The local file becomes a cache and the fallback when the store is unreachable.</p>
 <pre><code>{
   "guide_store": "auto",
   "guide_pull_cmd": "git-store.sh pull",
@@ -346,9 +349,9 @@ https://github.com/AmeyaKasture/claude-review-loop/blob/main/docs/SETUP.md</code
   <p><code>guide_store</code> is <code>auto</code> (use the commands, fall back to the local copy), <code>command</code> (a failed save is an error), or <code>file</code>. <code>examples/guide-store/git-store.sh</code> is a complete store backed by git.</p>
   <h3>What the main thread reads before it writes code</h3>
 <pre><code>session start
-  ├─ CLAUDE.md / AGENTS.md          (repo rules, loaded by Claude Code)
-  └─ SessionStart hook → rl.py learnings-context
-        └─ newest author guide  (external store, else local file)
+  ├─ AGENTS.md / CLAUDE.md / …      (repo rules, loaded by the agent)
+  └─ rl.py learnings-context        (Claude Code: SessionStart hook; others: --text, or the agent's own hook)
+        └─ newest author guide  (Meko or another store, else local file)
 main thread writes code</code></pre>
 </section>
 
@@ -378,7 +381,8 @@ main thread writes code</code></pre>
   <h2><span class="num">10</span>Testing</h2>
   <div class="tbl"><table>
     <tr><th>Suite</th><th>Covers</th></tr>
-    <tr><td><code>tests/test_engine.sh</code> (offline, no model calls, runs in CI)</td><td>Config resolution and validation, check probe, rule-file de-duplication, review-skill brief, three outcomes, miss causes, report order, PR ingest, triage and replies, push guard, hook output, file and external guide stores (including the example git store), real comment formats.</td></tr>
+    <tr><td><code>tests/test_engine.sh</code> (offline, no model calls, runs in CI)</td><td>Config resolution and validation, check probe, rule-file de-duplication, review-skill brief, three outcomes, miss causes, report order, PR ingest, triage and replies, push guard, hook output, file and external guide stores (including the example git store), headless reviewers through a fake agent CLI, <code>install.sh</code> for other agents, real comment formats.</td></tr>
+    <tr><td><code>tests/test_meko_live.sh</code> (needs a running Meko; throwaway datapack)</td><td>Save, version, newest-wins, local copy refresh, fallback when Meko is down, loud failure on a strict save.</td></tr>
     <tr><td><code>claude plugin validate --strict</code></td><td>Marketplace and plugin manifests.</td></tr>
   </table></div>
   <p>Posting replies to GitHub is never exercised by the tests; it needs your push and your yes.</p>

@@ -58,8 +58,8 @@ triaging.
    the user the doubtful items first, then a short summary of the drafts.
 7. **Hand over.** Tell the user to commit and push the fixes themselves. Never
    commit or push for them.
-8. **Post only on an explicit yes.** After the user says they pushed, ask with
-   `AskUserQuestion` whether to post the drafted replies (options: post all,
+8. **Post only on an explicit yes.** After the user says they pushed, ask
+   the user (Claude Code: `AskUserQuestion`) whether to post the drafted replies (options: post all,
    let me edit first, do not post). Only on "post all" run
    `rl.py pr-replies --post`. It refuses while fixes are unpushed. Each reply
    starts with the configured `reply_prefix` (default `[AI] `).
