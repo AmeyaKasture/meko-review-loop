@@ -1,0 +1,12 @@
+{
+  "_comment": "A Python service. Format and lint in check mode, type-check the package, and run only the fast unit tests (integration tests need a database).",
+  "checks": [
+    "ruff format --check .",
+    "ruff check .",
+    "mypy src",
+    "pytest -q -m 'not integration'"
+  ],
+  "max_rounds": 5,
+  "strict": false,
+  "reply_prefix": "[AI] "
+}

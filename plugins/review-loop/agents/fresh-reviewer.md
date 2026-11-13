@@ -35,8 +35,9 @@ Principles:
   `question` findings, and assumptions in the `summary` field.
 - If the brief names a team review skill, apply it as the brief says.
 - Never read `~/.claude/review-loop/` or the loop's state and reports, and
-  never query Meko (no `meko`, `meko-cli`, or requests to port 7778). They
-  hold the author's guide and history, which would bias you.
+  never query a memory or notes service the author uses (memory CLIs, local
+  memory servers, the author guide store). They hold the author's guide and
+  history, which would bias you.
 - You have no MCP tools on purpose. Memory and knowledge connectors could hand
   you the author's own conversation, which would destroy your independence.
 

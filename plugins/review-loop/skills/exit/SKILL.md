@@ -22,11 +22,12 @@ engineer could follow, not a pile of notes.
 
 1. **Check the loop is finished.** `rl.py status`. If it is still `running`,
    stop and say so, unless the user passed `--force`.
-2. **Load the current guide:** `rl.py guide-pull`. The guide lives in the
-   local Meko (datapack `review-loop guide <owner>/<repo>`, a versioned
-   document) with `guide_file` as its local copy; this refreshes the copy and
-   says where it came from. If it reports Meko unavailable, tell the user
-   before going on.
+2. **Load the current guide:** `rl.py guide-pull`. The guide is the local
+   file `guide_file`; when the user has configured an external guide store
+   (`guide_pull_cmd` / `guide_push_cmd` in `~/.claude/review-loop/settings.json`),
+   that store holds the canonical version and this refreshes the local copy.
+   The output says where the guide came from. If it reports the store
+   unavailable, tell the user before going on.
 3. **Export:** `rl.py export-learnings` prints the path of
    `.review-loop/learnings.json`. Read it: fixed findings (with `claim`,
    `fix`, `miss`, `lesson`), not-valid findings, design differences with the
@@ -81,8 +82,8 @@ engineer could follow, not a pile of notes.
    ```
    rl.py guide-push --file <new guide> --history-file <history> --marker <marker from learnings.json>
    ```
-   It stores a new version of the guide in Meko and the history as a Meko
-   memory, refreshes the local copy, and appends `guide_history`. A marker
+   It sends the new version and the history to the external store (if one is
+   configured), refreshes the local copy, and appends `guide_history`. A marker
    already recorded is not recorded twice. Never write `guide_file` directly.
    Put cross-repository guidance in `global_guide` (a local file).
 10. **Rule proposals.** When a `covered-ignored` or `not-covered` item is
@@ -97,6 +98,7 @@ engineer could follow, not a pile of notes.
 
 - The guide and its history are only for the author session. Never write
   them into the repository, a reviewer brief, or anything a reviewer reads.
-- Only the local Meko (`http://127.0.0.1:7778`) holds the guide. Never use a
-  cloud connector (`mcp__claude_ai_*`) or `meko cloud_link` for it.
+- Only `rl.py guide-push` writes the guide, through the store the user
+  configured. Never copy it to another service or connector (`mcp__*`) on
+  your own initiative.
 - No secrets, customer data, or code excerpts longer than a line.

@@ -26,8 +26,8 @@ Keep these sections, in this order. Omit empty ones.
 
 ## Style
 
-- Imperative and specific: "When a helper returns `error`, return it; never
-  call `utils.ErrExit` inside it." Not "be careful with errors".
+- Imperative and specific: "When a helper can fail, return the error to the
+  caller; never exit the process inside it." Not "be careful with errors".
 - Each item says when it applies and why, in at most three lines.
 - Refer to `AGENTS.md` rules by file and heading instead of copying them.
 - No finding ids, dates, counts, or PR numbers in the guide body.
@@ -45,8 +45,8 @@ replacing the guide.
 ## Other destinations
 
 - Cross-repository guidance: also revise `~/.claude/review-loop/guides/_global.md`.
-- Store: the local Meko keeps every version of the guide (datapack
-  `review-loop guide <owner>/<repo>`) and each loop's history as a memory;
-  the local file is its copy. To keep it in files only, set
-  `"guide_store": "file"` in `~/.claude/review-loop/settings.json`.
+- Store: by default the guide is a local file. To keep every version in an
+  external store (a private git repository, a synced folder, a memory
+  server), set `guide_pull_cmd` and `guide_push_cmd` in
+  `~/.claude/review-loop/settings.json`; the local file then becomes its copy.
 - `AGENTS.md`: propose rules in the reply only; never edit.

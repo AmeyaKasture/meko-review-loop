@@ -1,0 +1,18 @@
+{
+  "_comment": "A monorepo with a Go service under services/api and other services beside it. Unit tests and vet run only on the changed packages and their importers ({go_packages}); the whole module still builds. `rl.py config --probe` flags any tool that is not installed.",
+  "review_skill": "branch-review",
+  "go_module": "services/api",
+  "go_tags": "unit",
+  "go_reverse_depth": 1,
+  "checks": [
+    "cd services/api && go build ./...",
+    "cd services/api && go vet -tags unit {go_packages}",
+    "cd services/api && go test -tags unit -count=1 {go_packages}",
+    "cd services/worker && golangci-lint run ./..."
+  ],
+  "max_rounds": 4,
+  "gate": true,
+  "reviewer_model": "sonnet",
+  "gate_model": "opus",
+  "size_limits": { "commits": 20, "files": 60, "lines": 3000 }
+}

@@ -1,0 +1,12 @@
+{
+  "_comment": "A TypeScript web app using pnpm. Mirrors the lint, typecheck, and unit-test jobs in CI; end-to-end tests are left to CI.",
+  "review_skill": "branch-review",
+  "checks": [
+    "pnpm -s tsc --noEmit",
+    "pnpm -s eslint . --max-warnings 0",
+    "pnpm -s vitest run --changed origin/main"
+  ],
+  "max_rounds": 4,
+  "reviewer_model": "opus",
+  "gate_model": "opus"
+}
