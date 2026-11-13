@@ -24,36 +24,48 @@
   edited as a whole per the user's `EXIT.md`, shown as a diff and applied on
   approval, with a separate history file. A SessionStart hook loads the
   guide into future author sessions only.
-- Author guide store: the local (offline) Meko keeps every guide version as an
-  artifact in datapack `review-loop guide <owner>/<repo>` and each loop's
-  history as a memory; `rl.py guide-pull` and `guide-push` read and write it
-  over Meko's local MCP endpoint, with the local file as cache and fallback
-  (`guide_store`: `meko`, `auto`, or `file`). Reviewers are told never to
-  query Meko, and have no MCP tools.
+- Author guide store: the guide is a local file by default. An external,
+  versioned store can be attached with two shell commands
+  (`guide_pull_cmd`, `guide_push_cmd` in `~/.claude/review-loop/settings.json`);
+  `rl.py guide-pull` and `guide-push` use it with the local file as cache and
+  fallback (`guide_store`: `auto`, `command`, or `file`).
+  `examples/guide-store/git-store.sh` is a store backed by a private git
+  repository. Reviewers are told never to query any memory or notes service,
+  and have no MCP tools.
+- `setup` skill (`/review-loop:setup`): surveys a repository (build system, CI
+  jobs, rule files, existing review skills, typical change size), offers to
+  add missing tooling (linter, type-checker, smoke test, CI workflow,
+  `AGENTS.md`) from per-stack defaults, works on an empty repository, drafts the
+  settings and, if needed, a team review skill from a template, asks where to
+  keep them, writes them, and probes every check. `docs/SETUP.md` lets Claude
+  install the plugin and run the setup from one pasted sentence.
+- `rl.py config [--probe]`: shows the settings in effect, flags unknown keys
+  and a missing review skill, and runs each check once without loop state.
+- Examples are generic (TypeScript app, Python service, Go monorepo).
 - Scoped Go checks: `{go_packages}` in a check expands to the changed packages,
   their importers (`go_reverse_depth`), and packages the author declares with
   `rl.py scope --add` (widen only, never narrow). Briefs list the scope with
   reasons; reviewers read the logs instead of re-running suites and report
   missing packages as `test-gap` findings.
 - Reviewers no longer receive team pitfalls or any author history.
-- Removed the cloud-oriented Meko extension and the AgentK bridge.
+- Removed the memory-service extension and the external agent bridge.
 
 ## 0.3.0 (2026-11-03)
 
 - Findings are marked `in-change`, `near-change`, or `outside-change` against the
-  reviewed diff (borrowed from AgentK's validation, as a flag rather than a
+  reviewed diff (borrowed from another review agent's validation, as a flag rather than a
   filter). The ingest listing shows `[outside change]`, and the rubric says when
   to defer such findings.
-- `review-loop-meko` 0.2.0 supports offline Meko (`yugabyte/meko`): local
-  default-datapack fallback, `/gotchas` datapacks with `MG-<n>` provenance, and
-  an optional local KB upload of the report.
-- `examples/agentk/`: AgentK prompt overrides that require an independent
-  verifier before a blocker or major finding is declined.
+- The optional memory-service extension (0.2.0) supports a local, offline
+  service, team pitfall collections with provenance, and an optional upload
+  of the report.
+- Example prompt overrides for an external review agent that require an
+  independent verifier before a blocker or major finding is declined.
 
 ## 0.2.0 (2026-11-03)
 
 - Packaged as a Claude Code plugin marketplace with two plugins: `review-loop`
-  and the optional `review-loop-meko` extension.
+  and an optional memory-service extension.
 - Stop guard moved from skill frontmatter to the plugin's `hooks/hooks.json`.
 - Reviewer and verifier agents block all MCP tools (`mcp__*`), so memory
   connectors cannot hand reviewers the author's own conversation.
@@ -68,7 +80,7 @@
 - Check probe (`run-checks --probe`) and `ENV-ERROR` detection, so a check
   that cannot run never blocks convergence.
 - `rl.py answer` records your decisions. `rl.py set-intent` and
-  `rl.py export-learnings` support the Meko extension.
+  `rl.py export-learnings` support the memory-service extension.
 - Duplicate hints now cover other reviewers in the same round. Duplicate
   chains resolve to the root finding.
 

@@ -34,7 +34,7 @@ Three more problems are handled mechanically:
   Accepted minor findings become optional fixes in the report.
 - **Context leaking through connectors.** Reviewer agents have every MCP tool
   removed, and the gate process loads no MCP servers and no hooks. Otherwise a
-  memory connector such as Meko could hand a reviewer the author's own
+  memory connector could hand a reviewer the author's own
   captured conversation.
 - **Premature stopping.** A Stop hook nudges the orchestrator back into the
   loop while it is running. It never traps you: it only fires for the owning

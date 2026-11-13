@@ -6,7 +6,7 @@
 # usage: fresh-session-review.sh [--model MODEL] [--name gate] [--budget-turns N] [--allow-mcp]
 #
 # Isolation: by default the gate session loads NO MCP servers and runs NO hooks, so
-# connectors (e.g. Meko) cannot inject context, capture the session, or spend quota.
+# connectors (memory servers, chat integrations) cannot inject context, capture the session, or spend quota.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 RL="$HERE/rl.py"

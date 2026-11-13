@@ -95,7 +95,7 @@ The orchestrator ran the project checks on this snapshot. Summary and logs:
 - Do not ask questions in your reply; nobody will answer it. Put design or
   intent doubts in the findings as `question`, and state assumptions in `summary`.
 - Do not read anything under `~/.claude/review-loop/`, `.review-loop/state.json`,
-  or `.review-loop/report-*`, and do not query Meko (`meko`, `meko-cli`, port 7778). They hold the author's history and would bias you.
+  or `.review-loop/report-*`, and do not query any memory or notes service (memory CLIs, local memory servers). They hold the author's history and would bias you.
   Your brief, the check logs, and your scratch directory are all you need there.
 
 ## Output

@@ -9,16 +9,12 @@ guard, and the final report.
 State lives in <repo>/.review-loop/ (excluded via .git/info/exclude).
 """
 import argparse
-import base64
 import datetime as dt
 import hashlib
 import json
 import os
 import re
-import shutil
 import subprocess
-import urllib.error
-import urllib.request
 import sys
 import tempfile
 
@@ -275,6 +271,70 @@ def cmd_init(a):
               "Ask the user before starting the loop.")
     if not checks:
         print("hint: no checks configured; run `rl.py detect-checks` and `rl.py set-checks`.")
+
+
+CONFIG_KEYS = {"_comment", "checks", "max_rounds", "strict", "gate", "gate_model", "reviewer_model",
+               "size_limits", "review_skill", "exit_instructions", "reply_prefix",
+               "go_module", "go_tags", "go_reverse_depth"}
+
+
+def cmd_config(a):
+    """Show the settings a loop in this repository would use, and what is wrong with them.
+    Needs no loop state, so the setup skill can verify a new config before the first loop."""
+    root = repo_root()
+    if not root:
+        sys.exit("not inside a git repository")
+    p, cfg = config_path(root), load_config(root)
+    problems = [f"unknown key '{k}'" for k in sorted(set(cfg) - CONFIG_KEYS)]
+    if not isinstance(cfg.get("checks", []), list):
+        problems.append("'checks' must be a list of shell commands")
+    name = cfg.get("review_skill")
+    if name and not review_skill_path(root, name):
+        problems.append(f"review skill '{name}' not found in .claude/skills/ or ~/.claude/skills/")
+    unknown_limits = set(cfg.get("size_limits", {})) - set(DEFAULT_SIZE_LIMITS)
+    if unknown_limits:
+        problems.append(f"unknown size_limits key(s): {', '.join(sorted(unknown_limits))}")
+    out = {"repo": root, "slug": repo_slug(root), "config": p,
+           "private_config": os.path.join(RL_HOME, "repos", repo_slug(root).replace("/", "__") + ".json"),
+           "settings": cfg, "review_skill_path": review_skill_path(root, name) if name else "",
+           "guide_store": guide_store(), "guide_file": guide_file(root), "problems": problems}
+    if a.probe:
+        out["probe"] = []
+        checks = cfg.get("checks", []) if isinstance(cfg.get("checks", []), list) else []
+        if any(GO_PLACEHOLDER in c for c in checks):
+            # Scoped checks expand per round from loop state; here, prove `go list` works for them.
+            mod = os.path.join(root, cfg.get("go_module", ""))
+            tags = cfg.get("go_tags", "")
+            try:
+                r = subprocess.run(["go", "list"] + (["-tags", tags] if tags else []) + ["./..."], cwd=mod,
+                                   capture_output=True, text=True, timeout=a.timeout)
+                ok, tail = r.returncode == 0, (r.stderr or "").strip()[-300:]
+            except (OSError, subprocess.TimeoutExpired) as e:
+                ok, tail = False, str(e)[-300:]
+            out["probe"].append({"command": f"go list ./... in {os.path.relpath(mod, root)} (for {GO_PLACEHOLDER})",
+                                 "result": "PASS" if ok else "ENV-ERROR", "exit_code": 0 if ok else 1, "tail": tail})
+            if not ok:
+                problems.append(f"{GO_PLACEHOLDER} cannot be computed: go list failed; check go_module / go_tags")
+        for c in checks:
+            if GO_PLACEHOLDER in c:
+                out["probe"].append({"command": c, "result": "SCOPED", "exit_code": None,
+                                     "tail": "runs on the changed packages during a loop"})
+                continue
+            try:
+                r = subprocess.run(c, shell=True, cwd=root, capture_output=True, text=True, timeout=a.timeout)
+                code, outp = r.returncode, r.stdout + r.stderr
+            except subprocess.TimeoutExpired:
+                code, outp = 124, ""
+            env_err = code != 0 and (code == 127 or bool(ENV_ERROR_RE.search(outp)))
+            tag = "ENV-ERROR" if env_err else "TIMEOUT" if code == 124 else "PASS" if code == 0 else "FAIL"
+            out["probe"].append({"command": c, "result": tag, "exit_code": code, "tail": outp.strip()[-300:]})
+            if env_err:
+                problems.append(f"check cannot run here (missing tool or module): {c}")
+    print(json.dumps(out, indent=2))
+    if not p:
+        print("no settings found: write .review-loop.json at the repository root, or "
+              f"{out['private_config']}", file=sys.stderr)
+    return 1 if problems else 0
 
 
 def cmd_set_intent(a):
@@ -1405,14 +1465,18 @@ def cmd_pr_replies(a):
 
 
 # ------------------------------------------------------- author guide store
-# The guide's home is a local Meko (offline, http://127.0.0.1:7778) when available, with the
-# local file as cache and fallback. Settings: RL_HOME/settings.json {"guide_store": "auto|meko|file"}.
-MEKO_URL = os.environ.get("MEKO_URL", "http://127.0.0.1:7778")
-GUIDE_ARTIFACT = "author-guide.md"
-MEKO_AGENT = "review-loop"
+# The guide always has a local copy in RL_HOME/guides/. Optionally an external store (a versioned
+# notes service, a synced folder, a private git repo, a memory server) holds the canonical copy,
+# reached through two user-supplied shell commands in RL_HOME/settings.json:
+#   {"guide_store": "auto|command|file", "guide_pull_cmd": "...", "guide_push_cmd": "..."}
+# Both run with RL_REPO_SLUG set. Pull prints the newest guide on stdout (empty = none yet; non-zero
+# exit = store unavailable). Push reads RL_GUIDE_FILE, RL_HISTORY_FILE (may be empty) and RL_MARKER,
+# and may print a version id. "auto" (the default) uses the commands when set and falls back to the
+# local copy; "command" makes a failed save an error; "file" ignores the commands.
+STORE_TIMEOUT = 20
 
 
-class MekoError(Exception):
+class StoreError(Exception):
     pass
 
 
@@ -1425,111 +1489,42 @@ def rl_settings():
 
 
 def guide_store():
-    return os.environ.get("REVIEW_LOOP_GUIDE_STORE") or rl_settings().get("guide_store", "auto")
+    s = os.environ.get("REVIEW_LOOP_GUIDE_STORE") or rl_settings().get("guide_store", "auto")
+    if s == "auto" and not (rl_settings().get("guide_pull_cmd") and rl_settings().get("guide_push_cmd")):
+        return "file"
+    return s
 
 
-def meko_token():
-    if os.environ.get("MEKO_TOKEN"):
-        return os.environ["MEKO_TOKEN"]
-    exe = shutil.which("meko") or os.path.expanduser("~/.local/bin/meko")
-    if not os.path.exists(exe):
-        raise MekoError("meko is not installed")
-    r = subprocess.run([exe, "token"], capture_output=True, text=True, timeout=5)
-    if r.returncode or not r.stdout.strip():
-        raise MekoError("could not read the Meko token (`meko token`)")
-    return r.stdout.strip()
-
-
-def meko_call(tok, name, args, timeout=20):
-    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                       "params": {"name": name, "arguments": args}}).encode()
-    req = urllib.request.Request(MEKO_URL + "/mcp", data=body, headers={
-        "Authorization": "Bearer " + tok, "Content-Type": "application/json",
-        "Accept": "application/json, text/event-stream"})
+def store_run(key, slug, extra=None):
+    cmd = rl_settings().get(key)
+    if not cmd:
+        raise StoreError(f"{key} is not set in {os.path.join(RL_HOME, 'settings.json')}")
+    env = dict(os.environ, RL_REPO_SLUG=slug, **(extra or {}))
     try:
-        out = json.loads(urllib.request.urlopen(req, timeout=timeout).read())
-    except (urllib.error.URLError, OSError, ValueError) as e:
-        raise MekoError(f"{name}: Meko is not reachable at {MEKO_URL} ({e})")
-    if "error" in out:
-        raise MekoError(f"{name}: {out['error']}")
-    text = out["result"]["content"][0]["text"]
-    try:
-        val = json.loads(text)
-    except ValueError:
-        raise MekoError(f"{name}: {text[:200]}")
-    if isinstance(val, dict) and val.get("error"):
-        raise MekoError(f"{name}: {val['error']} {val.get('detail', '')}".strip())
-    return val
+        r = subprocess.run(cmd, shell=True, env=env, capture_output=True, text=True, timeout=STORE_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise StoreError(f"{key} timed out after {STORE_TIMEOUT}s")
+    if r.returncode != 0:
+        raise StoreError(f"{key} exited {r.returncode}: {(r.stderr or r.stdout).strip()[:200]}")
+    return r.stdout
 
 
-def meko_rest(tok, path, timeout=5):
-    req = urllib.request.Request(MEKO_URL + "/api/v1" + path, headers={"Authorization": "Bearer " + tok})
-    try:
-        return json.loads(urllib.request.urlopen(req, timeout=timeout).read())["data"]
-    except (urllib.error.URLError, OSError, ValueError, KeyError) as e:
-        raise MekoError(f"GET {path}: {e}")
-
-
-def meko_datapack_name(slug):
-    return ("review-loop guide " + slug)[:60]
-
-
-def meko_datapack(tok, slug, create):
-    name = meko_datapack_name(slug)
-    for d in meko_rest(tok, "/datapacks"):
-        if d.get("datapack_name") == name:
-            return d["datapack_id"]
-    if not create:
-        return None
-    boot = meko_call(tok, "conversation_create", {"agent_id": MEKO_AGENT, "session_id": "review-loop-setup",
-                                                  "title": "review-loop setup"})["id"]
-    return meko_call(tok, "datapack_create", {"name": name, "conversation_id": boot, "agent_id": MEKO_AGENT,
-                                              "description": f"Private author guide for {slug}, written by "
-                                                             "review-loop's exit step. Never give to reviewers."})["datapack_id"]
-
-
-def meko_guide_get(tok, slug):
-    dp = meko_datapack(tok, slug, create=False)
-    if not dp:
-        return None, None
-    items = meko_rest(tok, f"/datapacks/{dp}/artifacts?q={GUIDE_ARTIFACT}")["items"]
-    items = [i for i in items if i["filename"] == GUIDE_ARTIFACT]
-    if not items:
-        return None, None
-    art = meko_rest(tok, f"/datapacks/{dp}/artifacts/{items[0]['content_hash']}")
-    return base64.b64decode(art["content_base64"]).decode(), items[0]["content_hash"]
-
-
-def meko_guide_put(tok, slug, text, history):
-    dp = meko_datapack(tok, slug, create=True)
-    conv = meko_call(tok, "conversation_create", {"datapack_id": dp, "agent_id": MEKO_AGENT,
-                                                  "session_id": "review-loop-guide-" + slug.replace("/", "__"),
-                                                  "title": f"Author guide revisions: {slug}"})["id"]
-    art = meko_call(tok, "artifact_put", {"datapack_id": dp, "conversation_id": conv, "agent_id": MEKO_AGENT,
-                                          "filename": GUIDE_ARTIFACT, "content_type": "text/markdown",
-                                          "content_base64": base64.b64encode(text.encode()).decode()})
-    if history:
-        meko_call(tok, "memory_add", {"datapack_id": dp, "conversation_id": conv, "agent_id": MEKO_AGENT,
-                                      "text": history})
-    return dp, art["content_hash"]
-
-
-def load_guide(root, timeout_ok=True):
-    """(text, source, note): Meko first (refreshing the local cache), else the local file."""
+def load_guide(root):
+    """(text, source, note): the external store first (refreshing the local copy), else the local file."""
     slug = repo_slug(root)
     local = guide_file(root)
     note = ""
     if guide_store() != "file":
         try:
-            text, h = meko_guide_get(meko_token(), slug)
-            if text is not None:
+            text = store_run("guide_pull_cmd", slug)
+            if text.strip():
                 if not os.path.exists(local) or open(local).read() != text:
                     with open(local, "w") as fh:
                         fh.write(text)
-                return text, f"meko:{h[:12]}", ""
-            note = "Meko has no guide for this repository yet"
-        except MekoError as e:
-            note = f"Meko unavailable ({e}); using the local copy"
+                return text, "store", ""
+            note = "the guide store has no guide for this repository yet"
+        except StoreError as e:
+            note = f"guide store unavailable ({e}); using the local copy"
     if os.path.exists(local):
         return open(local).read(), "file", note
     return None, "none", note
@@ -1540,13 +1535,12 @@ def cmd_guide_pull(a):
     if not root:
         sys.exit("not inside a git repository")
     text, source, note = load_guide(root)
-    print(json.dumps({"source": source, "path": guide_file(root), "store": guide_store(),
-                      "meko_datapack": meko_datapack_name(repo_slug(root)), "note": note,
+    print(json.dumps({"source": source, "path": guide_file(root), "store": guide_store(), "note": note,
                       "chars": len(text or "")}, indent=2))
 
 
 def cmd_guide_push(a):
-    """Save an approved guide revision: Meko (versioned artifact + history memory), then the local cache."""
+    """Save an approved guide revision: the external store (if configured), then the local copy."""
     root = repo_root()
     if not root:
         sys.exit("not inside a git repository")
@@ -1559,13 +1553,20 @@ def cmd_guide_push(a):
         re.sub(r"^<!-- author guide for .*? -->\n", "", text)
     store, where = guide_store(), "file"
     if store != "file":
-        try:
-            dp, h = meko_guide_put(meko_token(), slug, stamped, "" if seen else history)
-            where = f"meko:{h[:12]} (datapack {meko_datapack_name(slug)})"
-        except MekoError as e:
-            if store == "meko":
-                sys.exit(f"guide not saved: {e}. Start Meko (`meko start`) or set guide_store to file.")
-            print(f"warning: {e}; saved locally only", file=sys.stderr)
+        with tempfile.TemporaryDirectory() as tmp:
+            gp, hp = os.path.join(tmp, "guide.md"), os.path.join(tmp, "history.md") if history and not seen else ""
+            open(gp, "w").write(stamped)
+            if hp:
+                open(hp, "w").write(history + "\n")
+            try:
+                out = store_run("guide_push_cmd", slug, {"RL_GUIDE_FILE": gp, "RL_HISTORY_FILE": hp,
+                                                         "RL_MARKER": a.marker or ""})
+                version = (out.strip().splitlines() or [""])[-1][:80]
+                where = f"store:{version}" if version else "store"
+            except StoreError as e:
+                if store == "command":
+                    sys.exit(f"guide not saved: {e}. Fix the store or set guide_store to file.")
+                print(f"warning: {e}; saved locally only", file=sys.stderr)
     with open(guide_file(root), "w") as fh:
         fh.write(stamped)
     if history and not seen:
@@ -1622,6 +1623,8 @@ def main():
     x.add_argument("--review-skill", help="team review skill reviewers must apply, e.g. branch-review")
     x.add_argument("--force", action="store_true"); x.set_defaults(fn=cmd_init)
     s.add_parser("detect-checks").set_defaults(fn=cmd_detect_checks)
+    x = s.add_parser("config"); x.add_argument("--probe", action="store_true"); x.add_argument("--timeout", type=int, default=300)
+    x.set_defaults(fn=cmd_config)
     x = s.add_parser("set-intent"); x.add_argument("--file", required=True); x.set_defaults(fn=cmd_set_intent)
     x = s.add_parser("set-checks"); x.add_argument("checks"); x.set_defaults(fn=cmd_set_checks)
     x = s.add_parser("scope"); x.add_argument("--add", nargs="+"); x.add_argument("--note"); x.set_defaults(fn=cmd_scope)

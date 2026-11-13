@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>review-loop Workflow</title>
-<meta name="description" content="The review-loop workflow: fresh-context review with branch-review, three-outcome triage, PR comment responses, and a private author guide revised from why each bug was missed.">
+<meta name="description" content="The review-loop workflow: fresh-context review with your team review skill, three-outcome triage, PR comment responses, and a private author guide revised from why each bug was missed.">
 <style>
 :root{
   --bg:#f7f6f2; --surface:#ffffff; --surface-2:#efede6; --ink:#1d1c1a; --muted:#5f5c55;
@@ -134,47 +134,60 @@ td.c{text-align:center}
 <body>
 <div class="wrap">
 <nav class="toc" aria-label="Contents">
-  <h2>Contents</h2>
   <a href="#glance">At a glance</a>
+  <a href="#setup">Setup</a>
   <a href="#flow">The workflow</a>
   <a href="#isolation">Who sees what</a>
   <a href="#review">The review</a>
   <a href="#triage">Triage and report</a>
   <a href="#respond">PR comments</a>
   <a href="#exit">Exit and the author guide</a>
-  <a href="#meko">Meko: the guide's home</a>
+  <a href="#store">Where the guide lives</a>
   <a href="#use">How to use it</a>
-  <a href="#verify">Verification</a>
-  <a href="#choices">Your call</a>
+  <a href="#verify">Testing</a>
+  <a href="#choices">Defaults</a>
 </nav>
 
 <main>
 <header class="hero">
   <div class="eyebrow">review-loop v0.4.0 · workflow and architecture</div>
   <h1>Implement, review with fresh eyes, answer the PR, learn</h1>
-  <p class="lede">Your main thread writes the code. Unbiased reviewers who never see its reasoning apply your <code>branch-review</code> skill and <code>AGENTS.md</code> rules. The main thread fixes what is valid, explains what is not, and flags doubtful items as design differences. After you push, the same thread answers the PR comments. At the end, the exit step asks the main thread why it missed each valid finding, and revises its author guide so that class of miss does not recur. Only the main thread ever reads that guide.</p>
+  <p class="lede">Your main thread writes the code. Unbiased reviewers who never see its reasoning apply your team's review skill and the repository's rule files. The main thread fixes what is valid, explains what is not, and flags doubtful items as design differences. After you push, the same thread answers the PR comments. At the end, the exit step asks the main thread why it missed each valid finding, and revises its author guide so that class of miss does not recur. Only the main thread ever reads that guide.</p>
   <div class="meta">
-    <span class="chip">local only</span><span class="chip">installed from ~/claude-review-loop</span>
-    <span class="chip">91 / 91 engine tests</span><span class="chip">local Meko 0.20261104.3</span><span class="chip">AgentK removed</span><span class="chip">2026-11-04</span>
+    <span class="chip">runs locally</span><span class="chip">Claude Code plugin</span><span class="chip">no model calls in tests</span><span class="chip">Apache-2.0</span>
   </div>
 </header>
 
 <section id="glance">
   <h2><span class="num">00</span>At a glance</h2>
   <div class="cards">
-    <div class="card info"><h4>Reviewers stay unbiased</h4><p>They get only a generated brief: the diff range, your stated requirements, the rule files, and the team review skill. No author guide, no history, no MCP, no edits. Checked live.</p></div>
+    <div class="card info"><h4>Reviewers stay unbiased</h4><p>They get only a generated brief: the diff range, your stated requirements, the rule files, and the team review skill. No author guide, no history, no MCP, no edits.</p></div>
     <div class="card good"><h4>Three outcomes per finding</h4><p>Valid: fix it and diagnose why it was missed. Not valid: keep the code and give the reason. Doubtful: keep the code and list it first in the report as a possible design difference.</p></div>
     <div class="card warn"><h4>Same thread answers the PR</h4><p>After you push, <code>/review-loop:respond</code> ingests the open comments, triages them the same way, re-reviews any fixes, and drafts replies. It posts them only after your explicit yes.</p></div>
     <div class="card info"><h4>The main thread gets better</h4><p><code>/review-loop:exit</code> turns each miss cause into an edit of a topic-organised author guide, per your <code>EXIT.md</code>, shown as a diff for your yes. A hook loads it into future main sessions only.</p></div>
   </div>
 </section>
 
+<section id="setup">
+  <h2><span class="num">01</span>Setup</h2>
+  <p class="sub">One pasted sentence installs the plugin and configures the repository. Nothing is committed.</p>
+<pre><code>Set up review-loop for this repository by following
+https://github.com/AmeyaKasture/claude-review-loop/blob/main/docs/SETUP.md</code></pre>
+  <ol class="how">
+    <li><h4>Install</h4><p><code>claude plugin marketplace add</code> and <code>claude plugin install review-loop@review-loop</code>, at user or project scope. Skipped if already installed.</p></li>
+    <li><h4>Survey (read-only)</h4><p>Build manifests, CI jobs, contributor docs, rule files (<code>AGENTS.md</code>, <code>CLAUDE.md</code>, <code>REVIEW.md</code>, <code>BUGBOT.md</code>), existing review skills, and the typical size of merged changes.</p></li>
+    <li><h4>Draft and ask once</h4><p>Two to five fast checks that mirror CI, size limits a little above the usual change, and, if the repository has none, a review skill filled in from a template. You choose: private or committed settings, where the skill goes, models and gate, and the guide store.</p></li>
+    <li><h4>Write and prove</h4><p>Files are written (with a diff first if one exists), then <code>rl.py config --probe</code> runs each check once. A check that cannot run in this environment is replaced before it can block a loop.</p></li>
+  </ol>
+  <p>Once the plugin is installed, <code>/review-loop:setup</code> repeats steps 2 to 4 in any repository.</p>
+</section>
+
 <section id="flow">
-  <h2><span class="num">01</span>The workflow</h2>
+  <h2><span class="num">02</span>The workflow</h2>
   <p class="sub">Eight steps. Steps 2 to 4 repeat until a round is clean, and step 7 reuses them for PR comments.</p>
   <div class="flow" role="list">
     <div class="step" role="listitem"><div class="ph">1 · Main thread</div><h4>Implement</h4><p>You and Claude write the code. The author guide is already in context.</p></div>
-    <div class="step loop" role="listitem"><div class="ph">2 · Fresh agents</div><h4>Review round</h4><p>Snapshot the tree, run checks, then spawn 2 reviewers that apply <code>branch-review</code> + <code>AGENTS.md</code>. Later rounds: 1 full + 1 delta.</p></div>
+    <div class="step loop" role="listitem"><div class="ph">2 · Fresh agents</div><h4>Review round</h4><p>Snapshot the tree, run checks, then spawn 2 reviewers that apply the review skill and rule files. Later rounds: 1 full + 1 delta.</p></div>
     <div class="step loop" role="listitem"><div class="ph">3 · Main thread</div><h4>Triage</h4><p>Valid / not valid / doubtful. Calling a major not valid needs a neutral verifier.</p></div>
     <div class="step loop" role="listitem"><div class="ph">4 · Main thread</div><h4>Fix + why missed</h4><p>Fix valid findings and record the cause while fresh: <code>fixed --cause … --why …</code></p></div>
     <div class="step" role="listitem"><div class="ph">5 · New process</div><h4>Gate</h4><p>A separate <code>claude -p</code> reviews the identical tree, with no hooks, no MCP and no author guide.</p></div>
@@ -186,7 +199,7 @@ td.c{text-align:center}
   <div class="cycle">
     <span class="node">valid fix → why did I miss it?</span><span class="arr">→</span>
     <span class="node">exit: revise guide per EXIT.md (diff, your yes)</span><span class="arr">→</span>
-    <span class="node">local Meko: datapack <code>review-loop guide yugabyte/yb-voyager</code> (+ local copy)</span><span class="arr">→</span>
+    <span class="node">guide store: <code>~/.claude/review-loop/guides/&lt;owner&gt;__&lt;repo&gt;.md</code></span><span class="arr">→</span>
     <span class="node">SessionStart hook</span><span class="arr">→</span>
     <span class="node">main thread only</span><span class="arr">→</span>
     <span class="node">fewer bugs next time</span>
@@ -195,43 +208,43 @@ td.c{text-align:center}
 </section>
 
 <section id="isolation">
-  <h2><span class="num">02</span>Who sees what</h2>
+  <h2><span class="num">03</span>Who sees what</h2>
   <div class="tbl"><table>
     <tr><th>Information</th><th>Main thread</th><th>Reviewers + verifier</th><th>Gate process</th></tr>
     <tr><td>Author guide and miss history</td><td class="c yes">yes</td><td class="c no">no</td><td class="c no">no</td></tr>
     <tr><td>Author reasoning, ledger, earlier reports</td><td class="c yes">yes</td><td class="c no">no</td><td class="c no">no</td></tr>
     <tr><td>Stated requirements (intent)</td><td class="c yes">yes</td><td class="c yes">yes</td><td class="c yes">yes</td></tr>
-    <tr><td><code>AGENTS.md</code> rules (<code>CLAUDE.md</code>, <code>BUGBOT.md</code> are symlinks)</td><td class="c yes">yes</td><td class="c yes">yes</td><td class="c yes">yes</td></tr>
-    <tr><td><code>branch-review</code> skill</td><td>—</td><td class="c yes">yes</td><td class="c yes">yes</td></tr>
+    <tr><td>Rule files (<code>AGENTS.md</code>, <code>CLAUDE.md</code>, <code>REVIEW.md</code>, …)</td><td class="c yes">yes</td><td class="c yes">yes</td><td class="c yes">yes</td></tr>
+    <tr><td>Team review skill</td><td>—</td><td class="c yes">yes</td><td class="c yes">yes</td></tr>
     <tr><td>PR comments</td><td class="c yes">yes</td><td class="c no">no</td><td class="c no">no</td></tr>
-    <tr><td>MCP tools (Meko, Slack, …)</td><td class="c yes">yes</td><td class="c no">blocked</td><td class="c no">blocked</td></tr>
+    <tr><td>MCP tools (memory servers, chat, …)</td><td class="c yes">yes</td><td class="c no">blocked</td><td class="c no">blocked</td></tr>
     <tr><td>Can edit the repository</td><td class="c yes">yes</td><td class="c no">no</td><td class="c no">no</td></tr>
   </table></div>
-  <p><strong>How it is enforced.</strong> The author guide arrives through a SessionStart hook, which fetches it from the local Meko. Subagents do not run SessionStart, and the gate runs with all hooks disabled. Reviewer agents have <code>Edit</code>, <code>Write</code> and every <code>mcp__*</code> tool removed. Their prompt is one line, the path to a generated brief, and the brief and agent definitions tell them never to read <code>~/.claude/review-loop/</code> or the loop's state.</p>
-  <div class="callout warn"><p><strong>One soft spot:</strong> reviewers keep <code>Bash</code> so they can build, test and reproduce bugs. Nothing technically stops them from <code>cat</code>-ing the local copy or calling Meko over HTTP; only their instructions do (they have no Meko tools). In the live test, the reviewer did not have it in context.</p></div>
+  <p><strong>How it is enforced.</strong> The author guide arrives through a SessionStart hook. Subagents do not run SessionStart, and the gate runs with all hooks disabled. Reviewer agents have <code>Edit</code>, <code>Write</code> and every <code>mcp__*</code> tool removed. Their prompt is one line, the path to a generated brief, and the brief and agent definitions tell them never to read <code>~/.claude/review-loop/</code>, the loop's state, or any memory service.</p>
+  <div class="callout warn"><p><strong>One soft spot:</strong> reviewers keep <code>Bash</code> so they can build, test and reproduce bugs. Nothing technically stops them from <code>cat</code>-ing the local guide or calling a store's command line; only their instructions do.</p></div>
 </section>
 
 <section id="review">
-  <h2><span class="num">03</span>The review: your <code>branch-review</code> skill inside the loop</h2>
-  <p>Every reviewer brief, and the gate brief, tells the reviewer to invoke <code>branch-review</code> and apply its full method: the <code>AGENTS.md</code> walk from each changed file up to the root, the active rule checklist, the mechanical greps (<code>utils.ErrExit</code>, <code>time.Sleep</code> in tests, map reads without <code>ok</code>, <code>json:</code> tags), <code>go vet</code>, and all ten lenses. The brief adapts three things:</p>
+  <h2><span class="num">04</span>The review: your team's skill inside the loop</h2>
+  <p>When <code>review_skill</code> is set, every reviewer brief, and the gate brief, tells the reviewer to invoke that skill and apply its full method: the rule-file walk from each changed file up to the root, the active rule checklist, the mechanical checks, and every lens. <code>/review-loop:setup</code> writes one from a template when the repository has none. The brief adapts three things:</p>
   <div class="tbl"><table>
-    <tr><th>branch-review says</th><th>In the loop</th><th>Why</th></tr>
+    <tr><th>The skill says</th><th>In the loop</th><th>Why</th></tr>
     <tr><td><code>git diff $(merge-base main HEAD)..HEAD</code></td><td><code>git diff &lt;base&gt; &lt;snapshot&gt;</code>; delta reviewers use <code>&lt;previous round&gt; &lt;snapshot&gt;</code></td><td>The snapshot includes uncommitted work, and delta reviewers check only the fixes.</td></tr>
-    <tr><td>Step 2 change summary, Steps 5–6 output, posting</td><td>Skipped; schema JSON instead</td><td>The engine needs structured findings to track and de-duplicate.</td></tr>
-    <tr><td><code>sem</code> entity diff</td><td>Skipped if not installed (it isn't here)</td><td>Only feeds the summary table.</td></tr>
+    <tr><td>Change summary, output and posting steps</td><td>Skipped; schema JSON instead</td><td>The engine needs structured findings to track and de-duplicate.</td></tr>
+    <tr><td>A tool that is not installed</td><td>Skipped, and said so in the summary</td><td>A missing optional tool must not fail the review.</td></tr>
   </table></div>
   <div class="tbl"><table>
-    <tr><th>branch-review class</th><th>Loop severity</th><th>Blocks convergence?</th></tr>
+    <tr><th>Skill class</th><th>Loop severity</th><th>Blocks convergence?</th></tr>
     <tr><td>CRITICAL</td><td><span class="tag bad">blocker</span></td><td>Yes</td></tr>
-    <tr><td>WARNING (incl. any <code>AGENTS.md</code> violation)</td><td><span class="tag warn">major</span></td><td>Yes</td></tr>
+    <tr><td>WARNING (incl. any rule-file violation)</td><td><span class="tag warn">major</span></td><td>Yes</td></tr>
     <tr><td>SUGGESTION</td><td><span class="tag info">minor</span></td><td>Only with <code>--strict</code></td></tr>
     <tr><td>QUESTION</td><td><span class="tag good">question</span></td><td>Never; you triage it like any other finding</td></tr>
   </table></div>
-  <p>The engine also lists the governing rule files in each brief. It now finds <code>BUGBOT.md</code> and <code>.cursor/BUGBOT.md</code>, and counts symlinked copies once. In yb-voyager, <code>CLAUDE.md</code> and <code>.cursor/BUGBOT.md</code> both point at <code>AGENTS.md</code>. Deterministic checks for yb-voyager: <code>go build ./...</code> (about 30 s) and <code>go vet -tags unit ./cmd/... ./src/...</code> (about 5 s), both passing on <code>main</code>.</p>
+  <p>The engine also lists the governing rule files in each brief: <code>REVIEW.md</code>, <code>AGENTS.md</code>, <code>CLAUDE.md</code>, <code>BUGBOT.md</code>, <code>.cursor/BUGBOT.md</code> and <code>CONTRIBUTING.md</code> from each changed file's directory up to the root, counting symlinked copies once.</p>
 </section>
 
 <section id="triage">
-  <h2><span class="num">04</span>Triage and the report</h2>
+  <h2><span class="num">05</span>Triage and the report</h2>
   <div class="tbl"><table>
     <tr><th>Outcome</th><th>Code</th><th>Where it goes</th><th>Command</th></tr>
     <tr><td><span class="tag good">Valid</span></td><td>Fixed</td><td>"Valid: fixed", with why it was missed</td><td><code>triage ID accept</code> → <code>fixed ID --note … --cause … --why …</code></td></tr>
@@ -246,36 +259,35 @@ td.c{text-align:center}
 - B. Change it as the reviewer suggests
 ## Decisions you made
 ## Valid: fixed
-- R1-1 [major] cmd/export.go:212 map read without ok - use comma-ok
-  - Missed because: covered-ignored - AGENTS.md says check ok; not applied in a new helper
+- R1-1 [major] src/orders/export.ts:212 optional field read without a null check
+  - Missed because: covered-ignored - AGENTS.md says validate optional fields; not applied in a new helper
 ## Not valid: code kept as is (with reason)
 ## Optional fixes · Deferred · Rounds · How to inspect</code></pre>
 </section>
 
 <section id="respond">
-  <h2><span class="num">05</span>After you push: answering PR comments</h2>
+  <h2><span class="num">06</span>After you push: answering PR comments</h2>
   <ol class="how">
-    <li><h4><code>/review-loop:respond 3940</code> in the same thread</h4><p>Runs <code>rl.py reopen --pr 3940</code>, <code>snapshot --kind pr</code>, and <code>pr-ingest</code>, which reads unresolved threads, review bodies and PR comments through <code>gh</code>. It skips resolved threads, your own comments, and comments it has already seen.</p></li>
+    <li><h4><code>/review-loop:respond 128</code> in the same thread</h4><p>Runs <code>rl.py reopen --pr 128</code>, <code>snapshot --kind pr</code>, and <code>pr-ingest</code>, which reads unresolved threads, review bodies and PR comments through <code>gh</code>. It skips resolved threads, your own comments, and comments it has already seen.</p></li>
     <li><h4>Triage each comment the same three ways</h4><p>It reads the whole thread first. Valid comments are fixed, and the miss is diagnosed (why did the loop and the author both miss it?). Not-valid ones get a reason, with a verifier for major ones. Doubtful ones become design differences.</p></li>
     <li><h4>Fixes go back through fresh review</h4><p>Any change made for a comment triggers a normal round (full + delta) and the gate. PR-driven fixes are never exempt.</p></li>
-    <li><h4>Drafts, then your push, then your yes</h4><p><code>pr-replies</code> writes <code>.review-loop/pr-replies.md</code> and posts nothing. After you push and approve, <code>pr-replies --post</code> replies in each thread with an <code>[AI] </code> prefix. It refuses while fixes are uncommitted or unpushed, and it never resolves threads or approves.</p></li>
+    <li><h4>Drafts, then your push, then your yes</h4><p><code>pr-replies</code> writes <code>.review-loop/pr-replies.md</code> and posts nothing. After you push and approve, <code>pr-replies --post</code> replies in each thread with the <code>reply_prefix</code> (default <code>[AI] </code>). It refuses while fixes are uncommitted or unpushed, and it never resolves threads or approves.</p></li>
   </ol>
   <div class="tbl"><table>
-    <tr><th>Comment looks like</th><th>Severity</th><th>Seen on</th></tr>
-    <tr><td><code>[AI][Warning] **…**</code>, <code>[CRITICAL]</code>, <code>[AI][Suggestion]</code></td><td>major, blocker, minor</td><td>post-pr-review comments (e.g. PR 3936)</td></tr>
-    <tr><td><code>**minor** — …</code></td><td>minor</td><td>bot reviews (PR 3934, 3939)</td></tr>
+    <tr><th>Comment looks like</th><th>Severity</th><th>Typical source</th></tr>
+    <tr><td><code>[AI][Warning] **…**</code>, <code>[CRITICAL]</code>, <code>[AI][Suggestion]</code></td><td>major, blocker, minor</td><td>AI review bots with tagged output</td></tr>
+    <tr><td><code>**minor** — …</code></td><td>minor</td><td>bot reviews with a bold severity</td></tr>
     <tr><td><code>High / Medium / Low Severity</code></td><td>major, minor, nit</td><td>Bugbot-style comments</td></tr>
     <tr><td>Untagged, ends with "?"</td><td>question</td><td>human questions</td></tr>
     <tr><td>Untagged inline request</td><td>major</td><td>human change requests</td></tr>
   </table></div>
-  <p>The GitHub query and the parser were checked read-only against real yb-voyager PRs 3934, 3936 and 3939. Nothing was posted.</p>
 </section>
 
 <section id="exit">
-  <h2><span class="num">06</span>Exit: why did I miss it, and what must the guide say?</h2>
+  <h2><span class="num">07</span>Exit: why did I miss it, and what must the guide say?</h2>
   <p class="sub">The exit step does not dump lessons into a file. It diagnoses each miss, then edits one coherent instructions document.</p>
   <h3>Step 1: the main thread diagnoses every valid finding</h3>
-  <p>It records one cause, ideally while fixing (when it still remembers writing the code), otherwise at exit. Before choosing, it searches the guide and the <code>AGENTS.md</code> chain for guidance that already covered the issue. "Covered" causes must quote that guidance.</p>
+  <p>It records one cause, ideally while fixing (when it still remembers writing the code), otherwise at exit. Before choosing, it searches the guide and the rule-file chain for guidance that already covered the issue. "Covered" causes must quote that guidance.</p>
   <div class="tbl"><table>
     <tr><th>Cause</th><th>Meaning</th><th>What changes in the guide</th></tr>
     <tr><td><span class="tag bad">not-covered</span></td><td>No guidance existed</td><td>Add guidance in the topic section where an author would look, saying when it applies and why.</td></tr>
@@ -287,69 +299,75 @@ td.c{text-align:center}
     <tr><td colspan="2">A design difference you decided</td><td>Recorded under "Design decisions", with the reason.</td></tr>
   </table></div>
   <h3>Step 2: revise the author guide as a document</h3>
-  <p>One guide per repository, structured by your <code>EXIT.md</code>. It lives in the local Meko as a versioned document (<code>rl.py guide-pull</code> fetches the newest; <code>guide-push</code> saves a new version plus a history memory), with <code>~/.claude/review-loop/guides/yugabyte__yb-voyager.md</code> as its local copy. Several findings with one root cause become one edit, overlaps are merged, superseded text is deleted, and the guide stays within its size budget (about 7,000 characters). Finding ids, dates and counts never go in the body; they go to <code>…history.md</code>.</p>
+  <p>One guide per repository, structured by your <code>EXIT.md</code>. Several findings with one root cause become one edit, overlaps are merged, superseded text is deleted, and the guide stays within its size budget (about 7,000 characters). Finding ids, dates and counts never go in the body; they go to <code>…history.md</code>.</p>
 <pre><code>## Before you start
-- Which resume paths does this change touch? Ask if the spec is silent.
+- Does this change alter a stored or public format? Ask if the spec is silent.
 ## While writing
 ### Error handling
-- When a helper returns `error`, return it with context (operation, object);
-  never `utils.ErrExit` inside it (root AGENTS.md, "Error handling").
+- When a helper can fail, return the error with context (operation, object);
+  never exit the process inside it (root AGENTS.md, "Error handling").
 ### Persistence and compatibility
-- Changing a `json:` tag on a metadb struct breaks resume of older runs;
-  add a migration or keep the old tag.
+- Renaming a serialised field breaks data written by older versions;
+  add a migration or keep the old name.
 ## Where to look
-- Before changing import batching, read `importBatch` callers in cmd/import*.go:
+- Before changing request batching, read the callers in src/batch/:
   retries reuse the batch object.
 ## Design decisions
-- Schema lookups go through the cache layer: called per row (PR review, confirmed).
+- Lookups go through the cache layer: called per row (PR review, confirmed).
 ## Before you finish
-- [ ] Every new map read of optional keys uses comma-ok.
+- [ ] Every read of an optional field handles the missing case.
 - [ ] No warn-and-continue on an unexpected state.</code></pre>
   <h3>Step 3: you approve the diff</h3>
-  <p>The exit step prints the miss table and <code>diff -u</code> of the guide, and asks you to apply it, edit it first, or skip it. Only on "apply" does it save a new guide version in Meko and one history entry for the loop (never twice for the same loop). Team-wide items are proposed as exact <code>AGENTS.md</code> text; it never edits that file.</p>
+  <p>The exit step prints the miss table and <code>diff -u</code> of the guide, and asks you to apply it, edit it first, or skip it. Only on "apply" does it save a new guide version and one history entry for the loop (never twice for the same loop). Team-wide items are proposed as exact <code>AGENTS.md</code> text; it never edits that file.</p>
   <p><strong>Your instructions file</strong>, <code>~/.claude/review-loop/EXIT.md</code>, defines the sections (Before you start, While writing by topic, Where to look, Design decisions, Before you finish), the writing style, the budget, the approval rule, and the destinations. Edit it, and every later exit follows it.</p>
 </section>
 
-<section id="meko">
-  <h2><span class="num">07</span>Meko: the guide's home</h2>
-  <p class="sub">Offline Meko 0.20261104.3 is installed and running on this machine only (<code>127.0.0.1:7778</code>, data in <code>~/.meko</code>).</p>
+<section id="store">
+  <h2><span class="num">08</span>Where the guide lives</h2>
   <div class="tbl"><table>
     <tr><th>What</th><th>Where it lives</th><th>Why</th></tr>
-    <tr><td>Author guide</td><td>Local Meko: datapack <code>review-loop guide yugabyte/yb-voyager</code>, document <code>author-guide.md</code>, one version per approved revision</td><td>One home that any agent connected to Meko can read; full version history. Reviewers have no Meko tools.</td></tr>
-    <tr><td>Why each finding was missed</td><td>Same datapack, one memory per loop (plus a local history file)</td><td>Searchable later ("what kinds of bugs do I keep writing?") without polluting the guide.</td></tr>
-    <tr><td>Local copy of the guide</td><td><code>~/.claude/review-loop/guides/…md</code></td><td>Refreshed on every read; used only if Meko is down, and the session is told so.</td></tr>
-    <tr><td>Rules: <code>AGENTS.md</code> (<code>CLAUDE.md</code>, <code>BUGBOT.md</code> are symlinks)</td><td>The repository</td><td>Versioned with each branch and needed by reviewers. Your main session already loads them through <code>CLAUDE.md</code>.</td></tr>
+    <tr><td>Author guide</td><td><code>~/.claude/review-loop/guides/&lt;owner&gt;__&lt;repo&gt;.md</code></td><td>Private to you, outside the repository, so reviewers and teammates never see it.</td></tr>
+    <tr><td>Why each finding was missed</td><td><code>…/&lt;owner&gt;__&lt;repo&gt;.history.md</code></td><td>Searchable later ("what kinds of bugs do I keep writing?") without polluting the guide.</td></tr>
+    <tr><td>Cross-repository guidance</td><td><code>~/.claude/review-loop/guides/_global.md</code></td><td>Habits that apply everywhere.</td></tr>
+    <tr><td>Rules: <code>AGENTS.md</code> and friends</td><td>The repository</td><td>Versioned with each branch and needed by reviewers.</td></tr>
   </table></div>
+  <h3>Optional external store</h3>
+  <p>To keep every version elsewhere (a private git repository, a synced folder, a notes or memory service), set two commands in <code>~/.claude/review-loop/settings.json</code>. The local file becomes a cache and the fallback when the store is unreachable.</p>
+<pre><code>{
+  "guide_store": "auto",
+  "guide_pull_cmd": "git-store.sh pull",
+  "guide_push_cmd": "git-store.sh push"
+}</code></pre>
+  <div class="tbl"><table>
+    <tr><th>Command</th><th>Gets</th><th>Must</th></tr>
+    <tr><td><code>guide_pull_cmd</code></td><td><code>RL_REPO_SLUG</code></td><td>Print the newest guide (nothing if none); exit non-zero if the store is unavailable.</td></tr>
+    <tr><td><code>guide_push_cmd</code></td><td><code>RL_REPO_SLUG</code>, <code>RL_GUIDE_FILE</code>, <code>RL_HISTORY_FILE</code>, <code>RL_MARKER</code></td><td>Store the new version and history; optionally print a version id.</td></tr>
+  </table></div>
+  <p><code>guide_store</code> is <code>auto</code> (use the commands, fall back to the local copy), <code>command</code> (a failed save is an error), or <code>file</code>. <code>examples/guide-store/git-store.sh</code> is a complete store backed by git.</p>
   <h3>What the main thread reads before it writes code</h3>
 <pre><code>session start
-  ├─ CLAUDE.md → AGENTS.md          (repo rules, loaded by Claude Code)
+  ├─ CLAUDE.md / AGENTS.md          (repo rules, loaded by Claude Code)
   └─ SessionStart hook → rl.py learnings-context
-        └─ local Meko: newest author-guide.md  (fallback: local copy)
+        └─ newest author guide  (external store, else local file)
 main thread writes code</code></pre>
-  <h3>Local-only settings</h3>
-  <ul>
-    <li><code>~/.meko/config.toml</code>: usage stats off (<code>[call_home] enabled = false</code>, confirmed "forced off by config.toml") and scheduled update checks off (<code>[update] channel = "off"</code>); run <code>meko update</code> by hand.</li>
-    <li>Web UI on this computer only (<code>http://127.0.0.1:7777</code>); no Meko Cloud link; memory extraction not enabled.</li>
-    <li><code>meko agent connect claude</code> added the local Meko MCP server to Claude Code, so your main session can also search it. Reviewers and the gate cannot.</li>
-    <li><code>~/.claude/review-loop/settings.json</code>: <code>{"guide_store": "meko"}</code>. Saving fails loudly if Meko is down, instead of silently writing only a file.</li>
-  </ul>
 </section>
 
 <section id="use">
-  <h2><span class="num">08</span>How to use it</h2>
-  <p><strong>Already set up for you:</strong> the plugin is installed from <code>~/claude-review-loop</code>; <code>~/.claude/review-loop/repos/yugabyte__yb-voyager.json</code> holds the private yb-voyager settings (<code>branch-review</code>, two Go checks, 4 rounds, Opus reviewers and gate, <code>[AI] </code> reply prefix); and <code>~/.claude/review-loop/EXIT.md</code> holds your exit instructions (how the author guide is structured and revised). Nothing was added to the yb-voyager repository.</p>
-<pre><code># 1. implement in a normal session in ~/yb-voyager
+  <h2><span class="num">09</span>How to use it</h2>
+<pre><code># 0. once per repository
+/review-loop:setup
+# 1. implement in a normal session
 # 2. harden it
 /review-loop:review-loop                 # branch + uncommitted vs main
 # 3. read the report; answer design differences; then push yourself
 # 4. once the PR has comments, in the same session
-/review-loop:respond 3940
+/review-loop:respond 128
 # 5. when the PR is done
 /review-loop:exit</code></pre>
   <div class="tbl"><table>
     <tr><th>Flag</th><th>Effect</th></tr>
     <tr><td><code>--strict</code></td><td>Minor findings (SUGGESTION) also block.</td></tr>
-    <tr><td><code>--max-rounds N</code></td><td>Round cap (4 for yb-voyager).</td></tr>
+    <tr><td><code>--max-rounds N</code></td><td>Round cap.</td></tr>
     <tr><td><code>--no-gate</code> / <code>--gate-model M</code></td><td>Skip the gate, or pick its model.</td></tr>
     <tr><td><code>--review-skill NAME</code></td><td>Override the team review skill.</td></tr>
     <tr><td><code>--checks "a;;b"</code></td><td>Exact check commands.</td></tr>
@@ -357,36 +375,25 @@ main thread writes code</code></pre>
 </section>
 
 <section id="verify">
-  <h2><span class="num">09</span>Verification</h2>
+  <h2><span class="num">10</span>Testing</h2>
   <div class="tbl"><table>
-    <tr><th>Check</th><th>Result</th></tr>
-    <tr><td>Offline engine tests: config, rule-file de-duplication, branch-review brief, three outcomes, miss causes, report order, PR ingest/triage/replies, push guard, hook output, real comment formats</td><td><span class="tag good">91 / 91</span></td></tr>
-    <tr><td><code>claude plugin validate --strict</code> (marketplace and plugin)</td><td><span class="tag good">pass</span></td></tr>
-    <tr><td>Live: main session receives the guide through SessionStart</td><td><span class="tag good">yes</span> quoted the marker</td></tr>
-    <tr><td>Live: gate-style session (<code>disableAllHooks</code>, <code>--strict-mcp-config</code>)</td><td><span class="tag good">not received</span></td></tr>
-    <tr><td>Live: <code>fresh-reviewer</code> subagent spawned from a session holding the guide</td><td><span class="tag good">not received</span></td></tr>
-    <tr><td>Read-only GitHub query and parser on real PRs 3934, 3936 and 3939</td><td><span class="tag good">parsed</span></td></tr>
-    <tr><td>yb-voyager checks on <code>main</code></td><td><span class="tag good">pass</span> build 30 s, vet 5 s</td></tr>
-    <tr><td>Live Meko: save, version, newest-wins, local copy refresh, fallback when down, loud failure on save (<code>tests/test_meko_live.sh</code>)</td><td><span class="tag good">9 / 9</span></td></tr>
-    <tr><td>Live end to end: guide stored in Meko → new main session quotes it, with the Meko version as source</td><td><span class="tag good">yes</span></td></tr>
-    <tr><td>Live: reviewer subagent with the guide in Meko</td><td><span class="tag good">no guide, no MCP tools</span></td></tr>
-    <tr><td>Live: gate-style session with the guide in Meko</td><td><span class="tag good">not received</span></td></tr>
-    <tr><td>Full loop on a real yb-voyager branch</td><td><span class="tag warn">not run yet</span></td></tr>
-    <tr><td>Posting replies to GitHub</td><td><span class="tag warn">not run</span> by design; needs your push and yes</td></tr>
+    <tr><th>Suite</th><th>Covers</th></tr>
+    <tr><td><code>tests/test_engine.sh</code> (offline, no model calls, runs in CI)</td><td>Config resolution and validation, check probe, rule-file de-duplication, review-skill brief, three outcomes, miss causes, report order, PR ingest, triage and replies, push guard, hook output, file and external guide stores (including the example git store), real comment formats.</td></tr>
+    <tr><td><code>claude plugin validate --strict</code></td><td>Marketplace and plugin manifests.</td></tr>
   </table></div>
+  <p>Posting replies to GitHub is never exercised by the tests; it needs your push and your yes.</p>
 </section>
 
 <section id="choices">
-  <h2><span class="num">10</span>Choices I made that are your call</h2>
+  <h2><span class="num">11</span>Defaults you can change</h2>
   <div class="tbl"><table>
-    <tr><th>Choice</th><th>Why</th><th>To change</th></tr>
-    <tr><td>Calling a major or blocker <em>not valid</em> still needs a neutral verifier</td><td>Your flow did not mention it, but it is the main guard against the author explaining real bugs away.</td><td>Tell me to drop it.</td></tr>
+    <tr><th>Default</th><th>Why</th><th>To change</th></tr>
+    <tr><td>Calling a major or blocker <em>not valid</em> needs a neutral verifier</td><td>The main guard against the author explaining real bugs away.</td><td>Triage rubric.</td></tr>
     <tr><td>Untagged inline PR comments count as major</td><td>Human change requests deserve a decision, and calling them not valid needs the verifier.</td><td>Rule in <code>comment_severity</code>.</td></tr>
-    <tr><td>Replies start with <code>[AI] </code></td><td>Matches your <code>post-pr-review</code> convention.</td><td><code>reply_prefix</code> in settings.</td></tr>
-    <tr><td>Settings kept private, outside the yb-voyager repo</td><td>Avoids an untracked file being committed by accident.</td><td>Commit <code>.review-loop.json</code> if the team wants it.</td></tr>
+    <tr><td>Replies start with <code>[AI] </code></td><td>Makes machine-drafted replies obvious to reviewers.</td><td><code>reply_prefix</code> in settings.</td></tr>
+    <tr><td>Settings can stay private, outside the repository</td><td>Try review-loop on a team repository without adding a file to it.</td><td>Commit <code>.review-loop.json</code> when the team adopts it.</td></tr>
     <tr><td>Doubtful defaults to "keep the current design" as the recommended option</td><td>Matches "keep the code as is".</td><td>Pass <code>--option</code> / <code>--recommend</code>.</td></tr>
   </table></div>
-  <footer>Local file generated 2026-11-04 from <code>~/claude-review-loop</code>; not published. Earlier Meko and AgentK analysis remains in git history (commit 85e322b).</footer>
 </section>
 </main>
 </div>

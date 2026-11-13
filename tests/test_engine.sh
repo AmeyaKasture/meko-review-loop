@@ -143,6 +143,22 @@ printf 'def load(m, k):\n    v = m[k]\n    return v\n' > lib.py; git commit -qam
 echo '{"review_skill": "branch-review", "gate": false, "max_rounds": 3}' > "$REVIEW_LOOP_HOME/repos/acme__widget.json"
 out="$("$RL" init --session S9 --target feat --intent "Load values." 2>&1)"
 expect "private config found" "$out" "acme__widget.json"
+cf="$("$RL" config)"
+expect "config resolves the private file" "$cf" '"config": "'"$REVIEW_LOOP_HOME"'/repos/acme__widget.json"'
+expect "config finds the review skill" "$cf" ".claude/skills/branch-review/SKILL.md"
+expect "config reports no problems" "$cf" '"problems": []'
+cp "$REVIEW_LOOP_HOME/repos/acme__widget.json" "$W/cfg.bak"
+echo '{"review_skill": "nope", "max_round": 3, "checks": ["true", "definitely-not-a-tool-xyz --x"]}' > "$REVIEW_LOOP_HOME/repos/acme__widget.json"
+cf="$("$RL" config --probe 2>&1 || true)"
+expect "config flags unknown keys" "$cf" "unknown key 'max_round'"
+expect "config flags a missing review skill" "$cf" "review skill 'nope' not found"
+expect "config probe flags a missing tool" "$cf" '"result": "ENV-ERROR"'
+if "$RL" config >/dev/null 2>&1; then bad "config exits non-zero on problems"; else ok "config exits non-zero on problems"; fi
+echo '{"go_tags": "unit", "go_reverse_depth": 2, "checks": ["go vet {go_packages}"]}' > "$REVIEW_LOOP_HOME/repos/acme__widget.json"
+cf="$("$RL" config --probe 2>&1 || true)"
+if grep -q "unknown key" <<<"$cf"; then bad "config accepts the Go scope keys"; else ok "config accepts the Go scope keys"; fi
+expect "config probe does not run scoped checks literally" "$cf" '"result": "SCOPED"'
+cp "$W/cfg.bak" "$REVIEW_LOOP_HOME/repos/acme__widget.json"
 expect "review skill recorded" "$out" '"review_skill": "branch-review"'
 "$RL" snapshot >/dev/null; "$RL" run-checks >/dev/null
 b="$(jq -r .brief <<<"$("$RL" brief --mode full --name a)")"
@@ -180,7 +196,7 @@ lj="$(cat "$("$RL" export-learnings)")"
 expect "export carries lesson" "$lj" "Check ok on every map read"
 expect "export names private author guide" "$lj" "$REVIEW_LOOP_HOME/guides/acme__widget.md"
 expect "export carries miss cause" "$lj" '"cause": "not-covered"'
-expect "export lists miss taxonomy" "$lj" '"covered-ignored"'
+expect "export lists miss taxonomy" "$lj" '"covered-ignored"' 
 expect "export lists design difference" "$lj" "why a temp variable?"
 
 echo "SessionStart learnings for the author session"
@@ -190,7 +206,7 @@ ctx="$(echo "{\"cwd\":\"$T2\"}" | "$RL" learnings-context)"
 expect "learnings injected as additionalContext" "$ctx" '"hookEventName": "SessionStart"'
 expect "learnings text present" "$ctx" "Check ok on map reads"
 
-echo "author guide store (file mode; Meko is covered by tests/test_meko_live.sh)"
+echo "author guide store (file mode)"
 printf '## While writing\n### Errors\n- Return errors with context.\n' > "$W/g1.md"; printf -- '- R1-1 not-covered: added Errors item\n' > "$W/h1.md"
 gp="$("$RL" guide-push --file "$W/g1.md" --history-file "$W/h1.md" --marker "review-loop:acme/widget:aaa:bbb")"
 expect "guide saved locally in file mode" "$gp" '"saved": "file"'
@@ -200,6 +216,34 @@ expect "same loop not recorded twice" "$("$RL" guide-push --file "$W/g1.md" --hi
 if [[ "$(grep -c 'author guide for' "$REVIEW_LOOP_HOME/guides/acme__widget.md")" == 1 ]]; then ok "stamp not duplicated on re-save"; else bad "stamp not duplicated on re-save"; fi
 expect "guide-pull reads local copy" "$("$RL" guide-pull)" '"source": "file"'
 expect "hook serves saved guide" "$(echo "{\"cwd\":\"$T2\"}" | "$RL" learnings-context)" "Return errors with context"
+
+echo "author guide store (external command store)"
+S="$W/store"; mkdir -p "$S"
+cat > "$W/settings.json" <<J
+{"guide_store": "command",
+ "guide_pull_cmd": "cat \"$S/\$(echo \$RL_REPO_SLUG | tr / _).md\" 2>/dev/null || true",
+ "guide_push_cmd": "cp \"\$RL_GUIDE_FILE\" \"$S/\$(echo \$RL_REPO_SLUG | tr / _).md\" && echo v-\$RL_MARKER"}
+J
+cp "$W/settings.json" "$REVIEW_LOOP_HOME/settings.json"
+printf '## While writing\n- v2: wrap errors.\n' > "$W/g2.md"
+gp="$(REVIEW_LOOP_GUIDE_STORE= "$RL" guide-push --file "$W/g2.md" --marker m2)"
+expect "push goes to the store and reports its version" "$gp" '"saved": "store:v-m2"'
+expect "store holds the guide" "$(cat "$S/acme_widget.md")" "v2: wrap errors"
+rm "$REVIEW_LOOP_HOME/guides/acme__widget.md"
+expect "pull reads the store" "$(REVIEW_LOOP_GUIDE_STORE= "$RL" guide-pull)" '"source": "store"'
+expect "local copy refreshed from the store" "$(cat "$REVIEW_LOOP_HOME/guides/acme__widget.md")" "v2: wrap errors"
+echo '{"guide_store": "command", "guide_pull_cmd": "exit 3", "guide_push_cmd": "exit 3"}' > "$REVIEW_LOOP_HOME/settings.json"
+expect "hook falls back to the local copy when the store fails" "$(echo "{\"cwd\":\"$T2\"}" | REVIEW_LOOP_GUIDE_STORE= "$RL" learnings-context)" "guide store unavailable"
+expect "strict store refuses to save silently" "$(REVIEW_LOOP_GUIDE_STORE= "$RL" guide-push --file "$W/g2.md" 2>&1 || true)" "guide not saved"
+GS="$HERE/examples/guide-store/git-store.sh"
+echo "{\"guide_store\": \"command\", \"guide_pull_cmd\": \"GUIDE_STORE_DIR=$W/gitstore $GS pull\", \"guide_push_cmd\": \"GUIDE_STORE_DIR=$W/gitstore $GS push\"}" > "$REVIEW_LOOP_HOME/settings.json"
+printf -- '- R1-1 not-covered\n' > "$W/h3.md"
+expect "example git store saves a version" "$(REVIEW_LOOP_GUIDE_STORE= "$RL" guide-push --file "$W/g2.md" --history-file "$W/h3.md" --marker m3)" '"saved": "store:'
+expect "example git store keeps history" "$(cat "$W/gitstore/acme__widget.history.md")" "R1-1 not-covered"
+expect "example git store serves the guide" "$(REVIEW_LOOP_GUIDE_STORE= "$RL" guide-pull)" '"source": "store"'
+echo '{"guide_store": "auto"}' > "$REVIEW_LOOP_HOME/settings.json"
+expect "auto without commands means file" "$(REVIEW_LOOP_GUIDE_STORE= "$RL" guide-pull)" '"store": "file"'
+rm "$REVIEW_LOOP_HOME/settings.json"
 
 echo "PR comments in the same thread"
 "$RL" reopen --pr 7 >/dev/null; "$RL" snapshot --kind pr >/dev/null
