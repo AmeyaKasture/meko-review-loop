@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Example external store for the review-loop author guide: a private git repository with one file
 # per repository and one commit per approved version. Copy it somewhere on your PATH and add to
-# ~/.claude/review-loop/settings.json:
+# ~/.review-loop/settings.json:
 #   {"guide_store": "auto",
 #    "guide_pull_cmd": "git-store.sh pull",
 #    "guide_push_cmd": "git-store.sh push"}

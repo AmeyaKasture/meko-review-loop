@@ -1,12 +1,12 @@
 # My exit instructions for review-loop
 
 The `/review-loop:exit` skill reads this file every time it revises my author
-guide. Edit it freely. It lives at `~/.claude/review-loop/EXIT.md` (or the
+guide. Edit it freely. It lives at `~/.review-loop/EXIT.md` (or the
 path in `exit_instructions` in a repository's review-loop settings).
 
 ## What the author guide is
 
-One document per repository, at `~/.claude/review-loop/guides/<owner>__<repo>.md`,
+One document per repository, at `~/.review-loop/guides/<owner>__<repo>.md`,
 that my main Claude session reads at the start of every session. It is how
 I want code written in that repository, learned from what reviewers caught.
 It is not a log, a list of past bugs, or a copy of `AGENTS.md`.
@@ -44,9 +44,9 @@ replacing the guide.
 
 ## Other destinations
 
-- Cross-repository guidance: also revise `~/.claude/review-loop/guides/_global.md`.
+- Cross-repository guidance: also revise `~/.review-loop/guides/_global.md`.
 - Store: by default the guide is a local file. To keep every version in an
   external store (a private git repository, a synced folder, a memory
   server), set `guide_pull_cmd` and `guide_push_cmd` in
-  `~/.claude/review-loop/settings.json`; the local file then becomes its copy.
+  `~/.review-loop/settings.json`; the local file then becomes its copy.
 - `AGENTS.md`: propose rules in the reply only; never edit.

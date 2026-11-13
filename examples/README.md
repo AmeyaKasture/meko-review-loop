@@ -8,5 +8,5 @@
 | `guide-store/git-store.sh` | An external author-guide store backed by a private git repository. |
 
 Copy a settings file to your repository root as `.review-loop.json`, or keep
-it private as `~/.claude/review-loop/repos/<owner>__<repo>.json`. Then run
+it private as `~/.review-loop/repos/<owner>__<repo>.json`. Then run
 `rl.py config --probe` (or `/review-loop:setup`, which writes one for you).

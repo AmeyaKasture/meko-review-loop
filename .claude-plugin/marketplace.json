@@ -1,17 +1,17 @@
 {
-  "name": "review-loop",
+  "name": "meko-review-loop",
   "owner": {
     "name": "Ameya Kasture"
   },
   "metadata": {
-    "description": "Fresh-context review-fix loops for Claude Code, with PR-comment responses and private author lessons.",
+    "description": "Meko Review Loop: agent-agnostic fresh-context review-fix loops, PR-comment responses, and a private author guide with optional Meko memory.",
     "version": "0.4.0"
   },
   "plugins": [
     {
       "name": "review-loop",
       "source": "./plugins/review-loop",
-      "description": "Fresh-context review, fix, repeat until clean; answer PR comments; save lessons for the author session only."
+      "description": "Fresh-context review, fix, repeat until clean; any agent CLI as reviewer or gate; answer PR comments; author guide in files or Meko."
     }
   ]
 }

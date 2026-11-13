@@ -24,7 +24,7 @@ engineer could follow, not a pile of notes.
    stop and say so, unless the user passed `--force`.
 2. **Load the current guide:** `rl.py guide-pull`. The guide is the local
    file `guide_file`; when the user has configured an external guide store
-   (`guide_pull_cmd` / `guide_push_cmd` in `~/.claude/review-loop/settings.json`),
+   (`guide_pull_cmd` / `guide_push_cmd` in `~/.review-loop/settings.json`),
    that store holds the canonical version and this refreshes the local copy.
    The output says where the guide came from. If it reports the store
    unavailable, tell the user before going on.
@@ -48,7 +48,7 @@ engineer could follow, not a pile of notes.
      useful answer; it changes the fix to the guide.
    Export again when done.
 5. **Read the user's instructions:** the file at `exit_instructions` (default
-   `~/.claude/review-loop/EXIT.md`). If it does not exist, copy
+   `~/.review-loop/EXIT.md`). If it does not exist, copy
    `${CLAUDE_SKILL_DIR}/reference/EXIT.template.md` there, tell the user, and
    follow it this time. It defines the guide's sections, style, size budget,
    and approval rules. Where it conflicts with this skill it wins, except for
@@ -75,7 +75,7 @@ engineer could follow, not a pile of notes.
    items rather than truncating.
 8. **Show the user and ask.** Print the miss analysis as a short table
    (finding, cause, why), then `diff -u <guide_file> <temp file>` (or the full
-   new file the first time). Ask with `AskUserQuestion`: apply, let me edit
+   new file the first time). Ask the user (Claude Code: `AskUserQuestion`): apply, let me edit
    first, or skip. Apply only on "apply" (or as `EXIT.md` says).
 9. **On apply:** write the history entry (each finding's cause and a one-line
    summary of what changed in the guide) to a temporary file, then save both:
@@ -99,6 +99,6 @@ engineer could follow, not a pile of notes.
 - The guide and its history are only for the author session. Never write
   them into the repository, a reviewer brief, or anything a reviewer reads.
 - Only `rl.py guide-push` writes the guide, through the store the user
-  configured. Never copy it to another service or connector (`mcp__*`) on
+  configured. Never copy it to another service or connector or MCP tool on
   your own initiative.
 - No secrets, customer data, or code excerpts longer than a line.

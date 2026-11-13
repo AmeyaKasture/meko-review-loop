@@ -57,10 +57,11 @@ Three more problems are handled mechanically:
  │
  ├─ fix accepted ──► rl.py fixed ──► rl.py status ──► NEXT_ROUND | GATE | CONVERGED | CAPPED
  │
- ├─ gate ──► fresh-session-review.sh ──► separate `claude -p` process,
- │                                       optional different model, schema-enforced JSON
+ ├─ gate ──► headless-review.sh ──► separate process of any agent CLI
+ │                                   (claude, codex, gemini, cursor, custom),
+ │                                   optional different vendor or model
  │
- └─ report (.review-loop/report-*.md) ──► AskUserQuestion for every judgement call
+ └─ report (.review-loop/report-*.md) ──► the user is asked about every judgement call
 ```
 
 Round 1 uses two full reviewers with different lenses. Later rounds use a
@@ -139,17 +140,17 @@ beat whole-repo suites.
 
 ## Extending it
 
-- **Cross-model gate with Codex.** If you install the Codex CLI, add a second
-  gate in `fresh-session-review.sh` that runs `codex exec` in a read-only
-  sandbox with the same brief and schema. Different model families miss
-  different bugs.
-- **More lenses.** Install `pr-review-toolkit` from the official marketplace
-  and name its agents (silent-failure-hunter, type-design-analyzer,
-  pr-test-analyzer) in reviewer lenses.
-- **CI.** The gate script works unchanged in a GitHub Action, since it only
-  needs `claude -p` and git.
-- **Workflow tool.** For fully deterministic orchestration across many PRs, the
-  same protocol can be expressed as a Claude Code Workflow script.
+- **Cross-vendor review.** Set `gate_agent` (or `reviewer_agent`) to a
+  different vendor's CLI from the author's agent, or run a second gate with
+  `headless-review.sh --mode gate --name gate2 --agent <other>`. Different
+  model families miss different bugs.
+- **More lenses.** Name extra review agents or skills your agent offers
+  (for example silent-failure or type-design reviewers) in reviewer lenses.
+- **CI.** The headless runner works unchanged in a CI job, since it only
+  needs an agent CLI, Python, and git.
+- **Workflow tools.** For fully deterministic orchestration across many PRs,
+  the same protocol can be driven by an agent's workflow or scripting
+  feature, since every step is an `rl.py` command.
 
 ## Sources
 

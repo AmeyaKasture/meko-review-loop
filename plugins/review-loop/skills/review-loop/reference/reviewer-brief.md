@@ -94,7 +94,7 @@ The orchestrator ran the project checks on this snapshot. Summary and logs:
 - Do not pad the list. An empty findings array is a valid, valuable answer.
 - Do not ask questions in your reply; nobody will answer it. Put design or
   intent doubts in the findings as `question`, and state assumptions in `summary`.
-- Do not read anything under `~/.claude/review-loop/`, `.review-loop/state.json`,
+- Do not read anything under `~/.review-loop/` (or `~/.claude/review-loop/`), `.review-loop/state.json`,
   or `.review-loop/report-*`, and do not query any memory or notes service (memory CLIs, local memory servers). They hold the author's history and would bias you.
   Your brief, the check logs, and your scratch directory are all you need there.
 

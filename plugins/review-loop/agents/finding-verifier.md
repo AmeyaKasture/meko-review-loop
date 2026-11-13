@@ -36,6 +36,6 @@ Use UNCERTAIN when the answer depends on intent or requirements the code
 cannot reveal (for example, whether a behaviour change is desired). That is a
 question for the human, not a coin toss.
 
-Never read `~/.claude/review-loop/` or the loop's state and reports, and never
+Never read `~/.review-loop/` (or `~/.claude/review-loop/`) or the loop's state and reports, and never
 query a memory or notes service the author uses (memory CLIs, local memory
 servers, the author guide store); judge the code, not the author's history.

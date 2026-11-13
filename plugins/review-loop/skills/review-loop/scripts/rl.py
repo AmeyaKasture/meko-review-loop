@@ -26,7 +26,14 @@ SEVERITIES = ["question", "nit", "minor", "major", "blocker"]  # question: needs
 SEV_RANK = {s: i for i, s in enumerate(SEVERITIES)}
 TRIAGE_VERDICTS = ["accept", "reject", "doubtful", "defer", "ask", "duplicate"]  # ask = doubtful with options
 CONFIG_FILE = ".review-loop.json"
-RL_HOME = os.environ.get("REVIEW_LOOP_HOME") or os.path.join(os.path.expanduser("~"), ".claude", "review-loop")
+HOME = os.path.expanduser("~")
+# Private per-user files (settings, author guides, EXIT.md). Agent-neutral by default; an existing
+# directory from older Claude-only versions keeps working.
+RL_HOME = os.environ.get("REVIEW_LOOP_HOME") or next(
+    (p for p in (os.path.join(HOME, ".review-loop"), os.path.join(HOME, ".claude", "review-loop"))
+     if os.path.isdir(p)), os.path.join(HOME, ".review-loop"))
+# Where agents keep skills (the Agent Skills layout: <dir>/<name>/SKILL.md), repository first, then home.
+SKILL_DIRS = (".agents/skills", ".claude/skills", ".cursor/skills", ".codex/skills", ".gemini/skills")
 LEARNINGS_CONTEXT_CAP = 8000
 # Why did the author session miss a valid finding? Drives how the author guide is edited.
 MISS_CAUSES = {
@@ -170,7 +177,12 @@ def load_config(root):
 
 
 def review_skill_path(root, name):
-    for base in (os.path.join(root, ".claude", "skills"), os.path.join(os.path.expanduser("~"), ".claude", "skills")):
+    """A skill name looked up in every agent's skills directory, or a path to a Markdown file."""
+    direct = os.path.expanduser(name)
+    if direct.endswith(".md"):
+        direct = direct if os.path.isabs(direct) else os.path.join(root, direct)
+        return direct if os.path.exists(direct) else ""
+    for base in [os.path.join(root, d) for d in SKILL_DIRS] + [os.path.join(HOME, d) for d in SKILL_DIRS]:
         p = os.path.join(base, name, "SKILL.md")
         if os.path.exists(p):
             return p
@@ -264,7 +276,8 @@ def cmd_init(a):
                       "review_skill": st["review_skill"],
                       "config": config_path(root), "state": state_path(root)}, indent=2))
     if st["review_skill"] and not review_skill_path(root, st["review_skill"]):
-        print(f"warning: review skill '{st['review_skill']}' not found under .claude/skills; "
+        print(f"warning: review skill '{st['review_skill']}' not found in any skills directory "
+              f"({', '.join(SKILL_DIRS)}); "
               "reviewers will fall back to the built-in lenses.")
     if over:
         print(f"SIZE GATE: change exceeds {', '.join(f'{k}>{limits[k]}' for k in over)}. "
@@ -275,7 +288,7 @@ def cmd_init(a):
 
 CONFIG_KEYS = {"_comment", "checks", "max_rounds", "strict", "gate", "gate_model", "reviewer_model",
                "size_limits", "review_skill", "exit_instructions", "reply_prefix",
-               "go_module", "go_tags", "go_reverse_depth"}
+               "go_module", "go_tags", "go_reverse_depth", "reviewer_agent", "gate_agent", "headless_command"}
 
 
 def cmd_config(a):
@@ -290,7 +303,7 @@ def cmd_config(a):
         problems.append("'checks' must be a list of shell commands")
     name = cfg.get("review_skill")
     if name and not review_skill_path(root, name):
-        problems.append(f"review skill '{name}' not found in .claude/skills/ or ~/.claude/skills/")
+        problems.append(f"review skill '{name}' not found in {', '.join(SKILL_DIRS)} (repository or home)")
     unknown_limits = set(cfg.get("size_limits", {})) - set(DEFAULT_SIZE_LIMITS)
     if unknown_limits:
         problems.append(f"unknown size_limits key(s): {', '.join(sorted(unknown_limits))}")
@@ -656,7 +669,7 @@ def cmd_brief(a):
     d = round_dir(root, n)
     out_json = os.path.join(d, f"{a.name}.json")
     mode_txt, delta_cmd = MODE_TEXT[a.mode]
-    if a.mode == "gate":
+    if a.output == "structured":
         output_section = ("Return your result as the structured output (the session enforces the JSON schema "
                           f"in `{SCHEMA_PATH}`). Set `\"reviewer\": \"{a.name}\"` and `\"round\": {n}`.")
     else:
@@ -707,8 +720,8 @@ def review_skill_section(root, st, mode, prev, snap):
     if not path:
         return "(No team review skill is configured; use the lens and the guides above.)"
     rng = f"{prev} {snap}" if mode == "delta" else f"{st['base']} {snap}"
-    return (f"This team reviews with the `{name}` skill. Invoke it with the Skill tool (or read `{path}` "
-            "if the Skill tool does not list it) and apply its method in full: the standards walk, the "
+    return (f"This team reviews with the `{name}` skill. Read `{path}` (or invoke it as a skill if your "
+            "agent lists it) and apply its method in full: the standards walk, the "
             "active rule checklist and mechanical checks, and every review lens.\n\n"
             "Adapt it to this loop:\n\n"
             f"- Review the range `git diff {rng}`. Wherever the skill says `main`, `MERGE_BASE`, or `HEAD`, "
@@ -795,18 +808,48 @@ def locate(f, cmap, slack=5):
     return "near-change"
 
 
+def unwrap(doc):
+    """Accept a findings object directly, or inside a headless agent's JSON envelope
+    (`structured_output`, or a text `result` / `response` that contains the JSON)."""
+    if isinstance(doc, dict) and "findings" in doc:
+        return doc
+    if isinstance(doc, dict) and isinstance(doc.get("structured_output"), dict):
+        return doc["structured_output"]
+    text = doc if isinstance(doc, str) else next(
+        (doc[k] for k in ("result", "response", "output", "text") if isinstance(doc, dict) and isinstance(doc.get(k), str)), "")
+    found = find_json_object(text, "findings")
+    return found if found is not None else (doc if isinstance(doc, dict) else {})
+
+
+def find_json_object(text, key):
+    """The last JSON object in free text that has `key` (agents often wrap it in prose or a fence)."""
+    dec, best, i = json.JSONDecoder(), None, text.find("{")
+    while i != -1:
+        try:
+            obj, end = dec.raw_decode(text, i)
+            if isinstance(obj, dict) and key in obj:
+                best = obj
+            i = text.find("{", end)
+        except ValueError:
+            i = text.find("{", i + 1)
+    return best
+
+
 def cmd_ingest(a):
     root = repo_root()
     st = load(root)
     n = need_round(st)
-    doc = json.load(open(a.file))
-    if "structured_output" in doc:  # raw `claude -p --output-format json`
-        doc = doc["structured_output"] or {}
+    raw = open(a.file).read()
+    try:
+        doc = json.loads(raw)
+    except ValueError:
+        doc = raw
+    doc = unwrap(doc)
     repairs = normalise(doc)
     errs = validate(doc)
     if errs:
         sys.exit("invalid reviewer output:\n  " + "\n  ".join(errs) +
-                 "\nSend these errors to the same reviewer (SendMessage) and ask it to rewrite its file, or "
+                 "\nSend these errors to the same reviewer and ask it to rewrite its file, or "
                  "re-run it. Do not skip it silently; if you must, run `rl.py drop-reviewer NAME --reason ...`.")
     if repairs:
         print(f"note: repaired {len(repairs)} reviewer slip(s): " + "; ".join(repairs[:6]) +
@@ -1581,10 +1624,12 @@ def cmd_learnings_context(a):
     """SessionStart hook: give the *author* session the lessons of earlier loops in this repo.
     Subagents do not run SessionStart, and the gate process runs with hooks disabled, so reviewers
     never receive this text. Never fails the session."""
-    try:
-        payload = json.load(sys.stdin)
-    except Exception:
-        payload = {}
+    payload = {}
+    if not a.text:
+        try:
+            payload = json.load(sys.stdin)
+        except Exception:
+            payload = {}
     try:
         root = repo_root(payload.get("cwd") or os.getcwd())
         if not root:
@@ -1606,7 +1651,10 @@ def cmd_learnings_context(a):
         ctx = ("Author guide for this repository, distilled from earlier review loops (why past changes had "
                "bugs, and the design choices that were confirmed). Follow it while writing code. Never paste "
                "it into a review-loop reviewer prompt.\n\n" + text)
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": ctx}}))
+        if a.text:
+            print(ctx)
+        else:
+            print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": ctx}}))
     except Exception:
         return 0
     return 0
@@ -1632,7 +1680,10 @@ def main():
     x = s.add_parser("run-checks"); x.add_argument("--timeout", type=int, default=900)
     x.add_argument("--probe", action="store_true", help="validate checks before round 1"); x.set_defaults(fn=cmd_run_checks)
     x = s.add_parser("brief"); x.add_argument("--mode", choices=["full", "delta", "gate"], required=True)
-    x.add_argument("--name", required=True); x.add_argument("--lens"); x.set_defaults(fn=cmd_brief)
+    x.add_argument("--name", required=True); x.add_argument("--lens")
+    x.add_argument("--output", choices=["file", "structured"], default="file",
+                   help="structured: the agent CLI enforces the schema and returns the JSON (Claude Code -p)")
+    x.set_defaults(fn=cmd_brief)
     x = s.add_parser("ingest"); x.add_argument("file"); x.add_argument("--reviewer"); x.set_defaults(fn=cmd_ingest)
     x = s.add_parser("triage"); x.add_argument("id"); x.add_argument("verdict", choices=TRIAGE_VERDICTS)
     x.add_argument("--note"); x.add_argument("--duplicate-of"); x.add_argument("--verifier", choices=["real", "not-real", "uncertain"])
@@ -1648,7 +1699,9 @@ def main():
     x.add_argument("--extra-rounds", type=int, default=3); x.set_defaults(fn=cmd_reopen)
     x = s.add_parser("pr-ingest"); x.add_argument("--from-file"); x.set_defaults(fn=cmd_pr_ingest)
     x = s.add_parser("pr-replies"); x.add_argument("--post", action="store_true"); x.set_defaults(fn=cmd_pr_replies)
-    s.add_parser("learnings-context").set_defaults(fn=cmd_learnings_context)
+    x = s.add_parser("learnings-context"); x.add_argument("--text", action="store_true",
+                                                         help="plain text for agents without SessionStart hooks")
+    x.set_defaults(fn=cmd_learnings_context)
     s.add_parser("guide-pull").set_defaults(fn=cmd_guide_pull)
     x = s.add_parser("guide-push"); x.add_argument("--file", required=True); x.add_argument("--history-file")
     x.add_argument("--marker"); x.set_defaults(fn=cmd_guide_push)
