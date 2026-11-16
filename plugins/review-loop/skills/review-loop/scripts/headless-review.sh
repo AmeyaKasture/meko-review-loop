@@ -61,7 +61,8 @@ if [[ "$MODE" == verify ]]; then
   } > "$PROMPT"
 else
   NAME="${NAME:-$MODE}"
-  args=(brief --mode "$MODE" --name "$NAME" --output "$OUTMODE"); [[ -n "$LENS" ]] && args+=(--lens "$LENS")
+  args=(brief --mode "$MODE" --name "$NAME" --output "$OUTMODE" --runner "$AGENT${MODEL:+ ($MODEL)}")
+  [[ -n "$LENS" ]] && args+=(--lens "$LENS")
   PROMPT="$("$RL" "${args[@]}" | jq -r .brief)"
 fi
 RAW="$DIR/$NAME.raw.out"; LAST="$DIR/$NAME.last.txt"; OUT="$DIR/$NAME.json"; ERR="$DIR/$NAME.stderr"

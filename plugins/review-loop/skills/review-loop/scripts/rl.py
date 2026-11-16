@@ -258,6 +258,7 @@ def cmd_init(a):
         "gate": (not a.no_gate) and bool(cfg.get("gate", True)),
         "gate_model": a.gate_model or cfg.get("gate_model", ""),
         "reviewer_model": a.reviewer_model or cfg.get("reviewer_model", ""),
+        "confirm_reviewers": (not a.no_confirm) and bool(cfg.get("confirm_reviewers", True)),
         "size": size,
         "size_limits": limits,
         "checks": checks,
@@ -288,7 +289,8 @@ def cmd_init(a):
 
 CONFIG_KEYS = {"_comment", "checks", "max_rounds", "strict", "gate", "gate_model", "reviewer_model",
                "size_limits", "review_skill", "exit_instructions", "reply_prefix",
-               "go_module", "go_tags", "go_reverse_depth", "reviewer_agent", "gate_agent", "headless_command"}
+               "go_module", "go_tags", "go_reverse_depth", "reviewer_agent", "gate_agent", "headless_command",
+               "confirm_reviewers"}
 
 
 def cmd_config(a):
@@ -710,8 +712,60 @@ def cmd_brief(a):
         f.write(text)
     if a.name not in r["reviewers"]:
         r["reviewers"].append(a.name)
+    r.setdefault("plan", {})[a.name] = {
+        "mode": a.mode, "lens": a.lens or DEFAULT_LENS[a.mode], "runner": a.runner or "",
+        "range": f"{prev}..{r['snapshot']}" if a.mode == "delta" else f"{st['base']}..{r['snapshot']}"}
     save(root, st)
     print(json.dumps({"brief": bp, "output": out_json}, indent=2))
+
+
+MODE_SCOPE = {"full": "the whole change", "delta": "only the fixes since the last round",
+              "gate": "the whole change (final gate)"}
+
+
+def cmd_plan(a):
+    """What each reviewer of this round will test, as a table, so the user can drop overlap or
+    anything they do not want tested before the reviewers start."""
+    root = repo_root()
+    st = load(root)
+    n = need_round(st)
+    r = st["rounds"][str(n)]
+    plan = r.get("plan", {})
+    if not plan:
+        sys.exit(f"round {n} has no reviewer briefs yet; run `rl.py brief` for each reviewer first")
+    short = lambda rng: "..".join(x[:8] for x in rng.split(".."))
+    cell = lambda t: " ".join(t.split()).replace("|", "\\|")
+    lines = [f"Round {n} review plan ({r.get('kind', 'review')}):", "",
+             "| Reviewer | Scope | Diff | What it tests | Runs as | Status |", "|---|---|---|---|---|---|"]
+    for name, p in plan.items():
+        status = ("dropped" if name in r.get("dropped", {}) else
+                  "done" if name in r.get("verdicts", {}) else "planned")
+        lines.append(f"| {name} | {p['mode']}: {MODE_SCOPE[p['mode']]} | `{short(p['range'])}` | "
+                     f"{cell(p['lens'])} | {p['runner'] or 'not recorded'} | {status} |")
+    common = [f"{len(st['checks'])} check(s): " + "; ".join(f"`{c}`" for c in st["checks"]) if st["checks"]
+              else "no checks configured"]
+    if st.get("review_skill"):
+        common.append(f"the `{st['review_skill']}` review skill")
+    lines += ["", "Every reviewer also reads the results of " + ", and applies ".join(common) + "."]
+    seen = {}
+    for name, p in plan.items():
+        if name in r.get("dropped", {}):
+            continue
+        key = (p["mode"], " ".join(p["lens"].lower().split()))
+        if key in seen:
+            lines.append(f"Possible overlap: {seen[key]} and {name} have the same scope and focus.")
+        seen.setdefault(key, name)
+    pending = [x for x in plan if x not in r.get("dropped", {}) and x not in r.get("verdicts", {})]
+    lines.append("")
+    if not pending:
+        lines.append("NOTHING TO START: every planned reviewer is done or dropped.")
+    elif st.get("confirm_reviewers", True):
+        lines.append("CONFIRM: show this table to the user and ask whether to start " + ", ".join(pending) +
+                     ", drop some (`rl.py drop-reviewer NAME --reason ...`), or change a focus (re-run "
+                     "`rl.py brief` with a new --lens). Start nothing until they answer.")
+    else:
+        lines.append("PROCEED: confirm_reviewers is off; show this table to the user, then start " + ", ".join(pending) + ".")
+    print("\n".join(lines))
 
 
 def review_skill_section(root, st, mode, prev, snap):
@@ -1057,6 +1111,9 @@ def decide(st):
     waiting = [x for x in r["reviewers"] if x not in reported and x not in r.get("dropped", {})]
     if waiting:
         return "REVIEW", "Waiting for reviewer output to be ingested: " + ", ".join(waiting)
+    if not reported:
+        return "REVIEW", (f"Every reviewer in round {n} was dropped, so nothing reviewed this tree. Start at "
+                          "least one reviewer (`rl.py brief`, then spawn it), or stop the loop.")
     untriaged = [f["id"] for f in cur if f["status"] == "untriaged"]
     if untriaged:
         return "TRIAGE", "Untriaged: " + ", ".join(untriaged)
@@ -1667,6 +1724,7 @@ def main():
     x.add_argument("--intent-file"); x.add_argument("--session"); x.add_argument("--max-rounds", type=int, default=0)
     x.add_argument("--reviewer-model")
     x.add_argument("--strict", action="store_true"); x.add_argument("--no-gate", action="store_true")
+    x.add_argument("--no-confirm", action="store_true", help="start reviewers without asking (still shows the plan)")
     x.add_argument("--gate-model"); x.add_argument("--checks", help="commands separated by ';;'")
     x.add_argument("--review-skill", help="team review skill reviewers must apply, e.g. branch-review")
     x.add_argument("--force", action="store_true"); x.set_defaults(fn=cmd_init)
@@ -1681,9 +1739,11 @@ def main():
     x.add_argument("--probe", action="store_true", help="validate checks before round 1"); x.set_defaults(fn=cmd_run_checks)
     x = s.add_parser("brief"); x.add_argument("--mode", choices=["full", "delta", "gate"], required=True)
     x.add_argument("--name", required=True); x.add_argument("--lens")
+    x.add_argument("--runner", help="who runs this reviewer, for the plan table, e.g. 'subagent (sonnet)' or 'codex'")
     x.add_argument("--output", choices=["file", "structured"], default="file",
                    help="structured: the agent CLI enforces the schema and returns the JSON (Claude Code -p)")
     x.set_defaults(fn=cmd_brief)
+    s.add_parser("plan").set_defaults(fn=cmd_plan)
     x = s.add_parser("ingest"); x.add_argument("file"); x.add_argument("--reviewer"); x.set_defaults(fn=cmd_ingest)
     x = s.add_parser("triage"); x.add_argument("id"); x.add_argument("verdict", choices=TRIAGE_VERDICTS)
     x.add_argument("--note"); x.add_argument("--duplicate-of"); x.add_argument("--verifier", choices=["real", "not-real", "uncertain"])

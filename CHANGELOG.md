@@ -1,6 +1,18 @@
 # Changelog
 
 
+## 0.4.3
+
+- Review plan before reviewers start: `rl.py plan` prints a table of each
+  reviewer's diff, what it tests (its lens), who runs it, and its status,
+  plus the checks and review skill they share, and flags reviewers with the
+  same focus. The loop shows it and asks whether to start all, drop some,
+  change a focus, or stop, before every round and before the gate.
+  `confirm_reviewers: false` (or `init --no-confirm`) shows it and starts.
+- `rl.py brief --runner` records who runs a reviewer; the headless runner
+  sets it.
+- A round whose reviewers were all dropped no longer counts as clean.
+
 ## 0.4.2
 
 - The Meko guide store finds Meko's agent endpoint instead of assuming port

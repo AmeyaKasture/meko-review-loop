@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Meko Review Loop: agent-agnostic fresh-context review-fix loops, PR-comment responses, and a private author guide with optional Meko memory.",
-    "version": "0.4.1"
+    "version": "0.4.3"
   },
   "plugins": [
     {

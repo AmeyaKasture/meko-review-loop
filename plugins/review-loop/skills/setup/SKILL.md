@@ -233,7 +233,7 @@ repository's tests need build tags.
 Valid keys: `checks`, `max_rounds`, `strict`, `gate`, `gate_model`,
 `reviewer_model`, `reviewer_agent`, `gate_agent`, `headless_command`,
 `size_limits`, `review_skill`, `exit_instructions`, `reply_prefix`,
-`go_module`, `go_tags`, `go_reverse_depth`, `_comment`. `rl.py config`
+`confirm_reviewers`, `go_module`, `go_tags`, `go_reverse_depth`, `_comment`. `rl.py config`
 rejects anything else.
 
 ## Step 6: Draft the review skill (only if none exists)

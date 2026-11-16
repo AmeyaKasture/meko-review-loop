@@ -188,7 +188,7 @@ https://github.com/AmeyaKasture/meko-review-loop/blob/main/docs/SETUP.md</code><
   <p class="sub">Eight steps. Steps 2 to 4 repeat until a round is clean, and step 7 reuses them for PR comments.</p>
   <div class="flow" role="list">
     <div class="step" role="listitem"><div class="ph">1 · Main thread</div><h4>Implement</h4><p>You and your agent write the code. The author guide is already in context.</p></div>
-    <div class="step loop" role="listitem"><div class="ph">2 · Fresh agents</div><h4>Review round</h4><p>Snapshot the tree, run checks, then spawn 2 reviewers that apply the review skill and rule files. Later rounds: 1 full + 1 delta.</p></div>
+    <div class="step loop" role="listitem"><div class="ph">2 · Fresh agents</div><h4>Review round</h4><p>Snapshot the tree, run checks, show you a table of what each reviewer will test (drop or refocus any, or stop), then spawn 2 reviewers that apply the review skill and rule files. Later rounds: 1 full + 1 delta.</p></div>
     <div class="step loop" role="listitem"><div class="ph">3 · Main thread</div><h4>Triage</h4><p>Valid / not valid / doubtful. Calling a major not valid needs a neutral verifier.</p></div>
     <div class="step loop" role="listitem"><div class="ph">4 · Main thread</div><h4>Fix + why missed</h4><p>Fix valid findings and record the cause while fresh: <code>fixed --cause … --why …</code></p></div>
     <div class="step" role="listitem"><div class="ph">5 · New process</div><h4>Gate</h4><p>A separate agent process (any CLI, ideally another vendor's model) reviews the identical tree, with no author guide.</p></div>

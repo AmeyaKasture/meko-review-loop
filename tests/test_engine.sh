@@ -349,6 +349,31 @@ echo '{"review_skill": "docs/review.md"}' > .review-loop.json; mkdir -p docs; ec
 expect "review skill may be a path to a Markdown file" "$("$RL" config)" "docs/review.md"
 cd "$T"; rm -rf "$T3"
 
+echo "review plan table before reviewers start"
+T4="$(mktemp -d)"; cd "$T4"; git init -q -b main; git config user.email t@t; git config user.name t
+echo a > a.txt; git add .; git commit -qm init; echo b >> a.txt
+"$RL" init --session S12 --target f --intent "x" --checks "true;;echo lint" >/dev/null; "$RL" snapshot >/dev/null
+expect "plan needs briefs first" "$("$RL" plan 2>&1 || true)" "no reviewer briefs yet"
+"$RL" brief --mode full --name r1a --runner "subagent (sonnet)" --lens "Correctness | edge cases" >/dev/null
+"$RL" brief --mode full --name r1b --runner codex --lens "correctness |  edge cases" >/dev/null
+"$RL" brief --mode full --name r1c --lens "Security" >/dev/null
+plan="$("$RL" plan)"
+expect "plan row names reviewer, scope, focus, runner" "$plan" "| r1a | full: the whole change |"
+expect "pipes in a lens do not break the table" "$plan" "Correctness \\| edge cases | subagent (sonnet) | planned |"
+expect "plan lists the shared checks" "$plan" "2 check(s): \`true\`; \`echo lint\`"
+expect "plan flags reviewers with the same focus" "$plan" "Possible overlap: r1a and r1b"
+expect "plan asks before starting by default" "$plan" "CONFIRM: show this table"
+"$RL" drop-reviewer r1b --reason "user: redundant" >/dev/null
+expect "dropped reviewer shows as dropped" "$("$RL" plan)" "| codex | dropped |"
+if "$RL" plan | grep -q "Possible overlap"; then bad "overlap clears once one is dropped"; else ok "overlap clears once one is dropped"; fi
+"$RL" drop-reviewer r1a --reason "user" >/dev/null; "$RL" drop-reviewer r1c --reason "user" >/dev/null
+expect "dropping every reviewer never counts as a clean round" "$("$RL" status 2>&1)" "Every reviewer in round 1 was dropped"
+echo '{"confirm_reviewers": false}' > .review-loop.json
+"$RL" init --force --session S13 --target f --intent "x" --checks "true" >/dev/null 2>&1; "$RL" snapshot >/dev/null
+"$RL" brief --mode full --name r1a >/dev/null
+expect "confirm_reviewers false starts without asking" "$("$RL" plan)" "PROCEED: confirm_reviewers is off"
+cd "$T"; rm -rf "$T4"
+
 echo "install.sh for agents without plugins"
 "$HERE/install.sh" --agent codex --dir "$W/skills" >/dev/null
 expect "skills installed under namespaced names" "$(ls "$W/skills" | tr '\n' ' ')" "review-loop review-loop-exit review-loop-respond review-loop-setup"

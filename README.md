@@ -90,7 +90,10 @@ The loop never commits or pushes; you do.
 2. **Loop.** Reviewers with a fresh context and no edit rights apply your
    team's review skill and the repository's rule files (`AGENTS.md`,
    `CLAUDE.md`, `REVIEW.md`, `BUGBOT.md`). They are subagents of your agent,
-   or separate processes of any agent CLI. Your session sorts every finding:
+   or separate processes of any agent CLI. Before they start, the agent
+   shows a table of what each reviewer will test (its diff, its focus, who
+   runs it) and flags overlap, so you can drop a reviewer, change its
+   focus, or stop. Your session sorts every finding:
    - **valid**: fix it, and record why the author session missed it;
    - **not valid**: keep the code, with the reason in the report (a neutral
      verifier must agree for serious findings);
@@ -216,6 +219,7 @@ repository). Command-line flags override both.
 | `max_rounds` | 5 | Round cap. |
 | `strict` | false | Block on minor findings too, not only major and blocker. |
 | `gate` | true | Finish with a gate review in a separate process. |
+| `confirm_reviewers` | true | Ask before starting each round's reviewers, after showing what each will test. `false` shows the table and starts at once. |
 | `size_limits` | 20 commits, 100 files, 5000 lines | Above these, the loop asks before round 1. |
 | `reply_prefix` | `"[AI] "` | Prefix for drafted PR replies. |
 | `exit_instructions` | `~/.review-loop/EXIT.md` | Your rules for revising the author guide. |

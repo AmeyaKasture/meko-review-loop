@@ -49,7 +49,7 @@ your first triage.
    has none, from the private file `~/.review-loop/repos/<owner>__<repo>.json`
    (keys: `checks`, `max_rounds`, `strict`, `gate`, `gate_model`,
    `reviewer_model`, `reviewer_agent`, `gate_agent`, `size_limits`, `review_skill`, `exit_instructions`,
-   `reply_prefix`); flags override them. `review_skill` names the team review
+   `reply_prefix`, `confirm_reviewers`); flags override them. `review_skill` names the team review
    skill (for example `branch-review`) that every reviewer must apply; the
    brief tells them how.
    **Size gate:** if `init` prints `SIZE GATE`, ask the user whether to proceed
@@ -78,17 +78,40 @@ your first triage.
 1. `rl.py snapshot` (creates `refs/review-loop/round-N`; the user's index and
    HEAD are untouched).
 2. `rl.py run-checks` (run it in the background if the suite is slow).
-3. Generate briefs. Each prints a brief path:
+3. Generate briefs, one per reviewer, whichever way the reviewers will run.
+   Each prints a brief path. `--runner` says who will run it (for the plan
+   table): `subagent`, or the CLI from `reviewer_agent`, plus the model.
    - **Round 1:** two `full` reviewers with different lenses, for example
      ```
-     rl.py brief --mode full --name r1a --lens "Correctness, edge cases, error handling, concurrency, resource handling."
-     rl.py brief --mode full --name r1b --lens "Contracts and callers, security, test adequacy, and gaps against the stated intent."
+     rl.py brief --mode full --name r1a --runner "subagent (sonnet)" --lens "Correctness, edge cases, error handling, concurrency, resource handling."
+     rl.py brief --mode full --name r1b --runner "subagent (sonnet)" --lens "Contracts and callers, security, test adequacy, and gaps against the stated intent."
      ```
      For a large change (roughly more than 800 changed lines or 15 files), add
      a third reviewer, or split the lenses by subsystem.
    - **Later rounds (dual path):** one fresh `full` reviewer and one `delta`
      reviewer that scrutinises only the fixes since the previous round.
-4. **Start all reviewers at once, in parallel.** Each reviewer must have a
+4. **Show the review plan.** `rl.py plan` prints a table: each reviewer, the
+   diff it reads, what it tests (its lens), who runs it, and its status,
+   plus the checks and review skill every reviewer shares, and any
+   `Possible overlap` it detects. Show the table to the user as printed. Then
+   follow its last line:
+   - `CONFIRM`: ask (your question tool, or a numbered list) with the
+     options *Start all (Recommended)*, *Drop some*, *Change a focus*, and
+     *Stop the loop*. Point out any overlap you see yourself, too: two lenses
+     that cover the same ground, or a lens on something the intent excludes.
+     For *Drop some*, run `rl.py drop-reviewer NAME --reason "user: <why>"`
+     for each one named (at least one reviewer must remain; to drop all,
+     stop the loop). For *Change a focus*, re-run `rl.py brief` for that
+     reviewer with the new `--lens`. Show `rl.py plan` again after any
+     change, and start nothing until the user says start.
+   - `PROCEED` (`confirm_reviewers` is `false`, or `init --no-confirm`):
+     show the table and start at once.
+   - In a run with no user to ask, treat `CONFIRM` as `PROCEED` and say so
+     in the report.
+   If the user later asks to stop a reviewer that is already running, stop
+   it (end its subagent or background process) and record it with
+   `rl.py drop-reviewer NAME --reason "user: <why>"`.
+5. **Start the remaining reviewers at once, in parallel.** Each reviewer must have a
    fresh context and no edit rights. Pick the first that applies:
    - **Settings name a `reviewer_agent` CLI** (`claude`, `codex`, `gemini`,
      `cursor`, `custom`), or your agent has no subagents: run each reviewer
@@ -96,7 +119,8 @@ your first triage.
      ```
      bash ${CLAUDE_SKILL_DIR}/scripts/headless-review.sh --mode full --name r1a --agent <cli> --lens "..."
      ```
-     It writes the brief, runs the reviewer, and ingests its findings. A
+     Pass the same name and lens as in the plan. It rewrites the brief for
+     its output format, runs the reviewer, and ingests its findings. A
      different vendor's model than yours is a strength, not a problem.
    - **Your agent has subagents:** spawn one per brief. In Claude Code use
      the `fresh-reviewer` agent type (listed as `review-loop:fresh-reviewer`
@@ -105,7 +129,7 @@ your first triage.
      must be exactly: `Read and follow the brief at <brief path>.`
    Add nothing else: no summaries, no previous findings, no hints about what
    you fixed.
-5. When they return: `rl.py verify-tree` (if it reports changes, inspect and
+6. When they return: `rl.py verify-tree` (if it reports changes, inspect and
    restore before continuing), then `rl.py ingest <output json>` for each
    subagent reviewer (the headless script ingests on its own).
    If an ingest is rejected as invalid, send the printed errors to that same
@@ -151,7 +175,11 @@ sanity test. Then run `rl.py status` and follow `NEXT`:
 ## Phase 4: gate review in a completely new session
 
 1. `rl.py snapshot --kind gate` and `rl.py run-checks`.
-2. Run in the background and wait for it to finish:
+2. `rl.py brief --mode gate --name gate --runner "<gate agent> (<gate model>)"`,
+   then `rl.py plan`, and handle its table and last line as in Phase 1,
+   step 4 (the user may stop the loop here, but the gate cannot be dropped
+   and still converge).
+3. Run in the background and wait for it to finish:
    ```
    bash ${CLAUDE_SKILL_DIR}/scripts/headless-review.sh --mode gate [--agent <cli>] [--model <gate model>]
    ```
@@ -159,7 +187,7 @@ sanity test. Then run `rl.py status` and follow `NEXT`:
    `claude`) with no session history, then ingests the result. Prefer a
    different model, or a different vendor, from the one that wrote the code:
    model diversity catches different bugs.
-3. Triage as in Phase 2. If anything blocking is accepted, fix it (Phase 3);
+4. Triage as in Phase 2. If anything blocking is accepted, fix it (Phase 3);
    `status` will then send you back to Phase 1.
 
 ## Phase 5: finish and ask
