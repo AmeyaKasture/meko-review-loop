@@ -154,7 +154,7 @@ td.c{text-align:center}
   <h1>Implement, review with fresh eyes, answer the PR, learn</h1>
   <p class="lede">Works with Claude Code, Codex, Cursor, Gemini CLI, or any agent that can follow a Markdown skill and run shell commands. Your main thread writes the code. Unbiased reviewers who never see its reasoning apply your team's review skill and the repository's rule files. The main thread fixes what is valid, explains what is not, and flags doubtful items as design differences. After you push, the same thread answers the PR comments. At the end, the exit step asks the main thread why it missed each valid finding, and revises its author guide so that class of miss does not recur. Only the main thread ever reads that guide.</p>
   <div class="meta">
-    <span class="chip">runs locally</span><span class="chip">any coding agent</span><span class="chip">optional Meko memory</span><span class="chip">no model calls in tests</span><span class="chip">Apache-2.0</span>
+    <span class="chip">runs locally</span><span class="chip">any coding agent</span><span class="chip">optional Meko memory</span><span class="chip">no model calls in tests</span>
   </div>
 </header>
 
@@ -174,7 +174,7 @@ td.c{text-align:center}
 <pre><code>Set up Meko Review Loop for this repository by following
 https://github.com/AmeyaKasture/meko-review-loop/blob/main/docs/SETUP.md</code></pre>
   <ol class="how">
-    <li><h4>Install</h4><p><code>install.sh --agent claude|codex|cursor|gemini|agents</code>: the plugin for Claude Code, or the skills copied into the agent's skills directory. Skipped if already installed.</p></li>
+    <li><h4>Install</h4><p>One line, <code>curl … install.sh | bash</code>, with no clone: it downloads only the plugin and installs for every agent CLI it finds (the plugin for Claude Code, the skills for the others). Skipped if already installed.</p></li>
     <li><h4>Survey (read-only)</h4><p>Build manifests, CI jobs, contributor docs, rule files (<code>AGENTS.md</code>, <code>CLAUDE.md</code>, <code>REVIEW.md</code>, <code>BUGBOT.md</code>), existing review skills, and the typical size of merged changes.</p></li>
     <li><h4>Draft and ask once</h4><p>Two to five fast checks that mirror CI, size limits a little above the usual change, and, if the repository has none, a review skill filled in from a template. You choose: private or committed settings, where the skill goes, which agents and models review, and where the author guide lives.</p></li>
     <li><h4>Meko</h4><p>If Meko is not installed or not running, it asks whether to install, start, and connect it to your agent; on yes it does so and points the author guide at it.</p></li>
@@ -381,7 +381,7 @@ main thread writes code</code></pre>
   <h2><span class="num">10</span>Testing</h2>
   <div class="tbl"><table>
     <tr><th>Suite</th><th>Covers</th></tr>
-    <tr><td><code>tests/test_engine.sh</code> (offline, no model calls, runs in CI)</td><td>Config resolution and validation, check probe, rule-file de-duplication, review-skill brief, three outcomes, miss causes, report order, PR ingest, triage and replies, push guard, hook output, file and external guide stores (including the example git store), headless reviewers through a fake agent CLI, <code>install.sh</code> for other agents, real comment formats.</td></tr>
+    <tr><td><code>tests/test_engine.sh</code> (offline, no model calls, runs in CI)</td><td>Config resolution and validation, check probe, rule-file de-duplication, review-skill brief, three outcomes, miss causes, report order, PR ingest, triage and replies, push guard, hook output, file and external guide stores (including the example git store), headless reviewers through a fake agent CLI, <code>install.sh</code> for other agents (from a checkout and piped from curl), real comment formats.</td></tr>
     <tr><td><code>tests/test_meko_live.sh</code> (needs a running Meko; throwaway datapack)</td><td>Save, version, newest-wins, local copy refresh, fallback when Meko is down, loud failure on a strict save.</td></tr>
     <tr><td><code>claude plugin validate --strict</code></td><td>Marketplace and plugin manifests.</td></tr>
   </table></div>

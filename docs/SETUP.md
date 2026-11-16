@@ -48,14 +48,15 @@ list of options.
    `review-loop-setup/SKILL.md` in `.agents/skills`, `.codex/skills`,
    `.cursor/skills`, or `.gemini/skills`, in the repository and the home
    directory. If found, skip to step 3.
-2. Ask where to get it from, recommending the first:
-   - GitHub: `git clone https://github.com/AmeyaKasture/meko-review-loop.git ~/meko-review-loop`
-   - A local clone the user names.
-3. Ask whether to install for every project (recommended) or only this
-   repository (`--project .`).
-4. Run `<clone>/install.sh --agent <your agent> [--project .]`. For an agent
-   with a skills directory not listed in the README, use
-   `--dir <that directory>`.
+2. Ask whether to install for every project (recommended) or only this
+   repository.
+3. Run, adding `-s -- --project .` after `bash` for this repository only:
+   `curl -fsSL https://raw.githubusercontent.com/AmeyaKasture/meko-review-loop/main/install.sh | bash`
+   It installs for every agent CLI it finds; add `--agent <your agent>`
+   (after `bash -s --`) to install only for yourself, or `--dir <skills
+   directory>` for an agent it does not know. If the user has a local clone
+   and prefers it, run `<clone>/install.sh` with the same options instead.
+4. If the download fails (no network, proxy), tell the user and stop.
 5. Note where the setup skill now is (`install.sh` prints it; for Claude Code
    use the path `claude plugin list` prints, plus `/skills/setup/SKILL.md`).
 

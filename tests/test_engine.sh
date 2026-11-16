@@ -358,6 +358,14 @@ expect "cross-skill reference follows the rename" "$(cat "$W/skills/review-loop-
 expect "verifier instructions installed for the headless runner" "$(ls "$W/skills/review-loop/agents")" "finding-verifier.md"
 expect "installed engine runs" "$(cd "$T" && "$W/skills/review-loop/scripts/rl.py" config 2>&1 || true)" '"repo":'
 
+echo "install.sh piped from curl, with no clone"
+git -C "$HERE" archive --prefix=meko-review-loop-main/ -o "$W/plugin.tar.gz" HEAD plugins
+piped="$(cd "$W" && REVIEW_LOOP_TARBALL="file://$W/plugin.tar.gz" bash -s -- --agent gemini --project "$W" < "$HERE/install.sh" 2>&1)"
+expect "piped install downloads only the archive" "$piped" "gemini: skills installed in $W/.gemini/skills"
+expect "piped install records its origin" "$(cat "$W/.gemini/skills/review-loop/.installed-from")" "AmeyaKasture/meko-review-loop@main"
+expect "piped install engine runs" "$(cd "$T" && "$W/.gemini/skills/review-loop/scripts/rl.py" config 2>&1 || true)" '"repo":'
+expect "no --agent and no agent CLI found falls back to .agents" "$(PATH=/usr/bin:/bin "$HERE/install.sh" --project "$W" 2>&1)" "agents: skills installed in $W/.agents/skills"
+
 echo "private directory: agent-neutral default, older location honoured"
 H="$W/fakehome"; mkdir -p "$H"
 rh() { HOME="$H" REVIEW_LOOP_HOME= python3 -c "import sys; sys.path.insert(0, '$(dirname "$RL")'); import rl; print(rl.RL_HOME)"; }

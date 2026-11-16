@@ -1,6 +1,15 @@
 # Changelog
 
 
+## 0.4.1
+
+- One-line install with no clone: `curl -fsSL
+  https://raw.githubusercontent.com/AmeyaKasture/meko-review-loop/main/install.sh | bash`
+  downloads only the plugin and installs for every agent CLI it finds
+  (`--agent` to choose; several agents at once, comma-separated). The Claude
+  Code marketplace is added from GitHub with a sparse checkout.
+- Removed the license file.
+
 ## 0.4.0
 
 - Renamed the project Meko Review Loop (`meko-review-loop`; the Claude Code

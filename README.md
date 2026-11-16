@@ -16,20 +16,31 @@ agent from the author, or a different vendor's model.
 ### 1. Install
 
 ```
-git clone https://github.com/AmeyaKasture/meko-review-loop.git ~/meko-review-loop
-~/meko-review-loop/install.sh --agent <your agent>
+curl -fsSL https://raw.githubusercontent.com/AmeyaKasture/meko-review-loop/main/install.sh | bash
 ```
 
-| Agent | `--agent` | What it installs |
-|---|---|---|
-| Claude Code | `claude` | The plugin: skills, reviewer subagents, and hooks. |
-| Codex | `codex` | Skills in `~/.codex/skills/`. |
-| Cursor | `cursor` | Skills in `~/.cursor/skills/`. |
-| Gemini CLI | `gemini` | Skills in `~/.gemini/skills/`. |
-| Any other | `agents`, or `--dir <its skills directory>` | Skills in `~/.agents/skills/` (or the directory you name). |
+No clone needed. It finds the agent CLIs on your machine and installs for
+each one: the plugin for Claude Code, and the skills for the others. Re-run
+it to update.
 
-Add `--project <repo>` to install into one repository instead of your home
-directory. Re-run the same command to update.
+| Agent | Installed as |
+|---|---|
+| Claude Code (`claude`) | The plugin: skills, reviewer subagents, and hooks. |
+| Codex (`codex`) | Skills in `~/.codex/skills/`. |
+| Cursor (`cursor-agent`) | Skills in `~/.cursor/skills/`. |
+| Gemini CLI (`gemini`) | Skills in `~/.gemini/skills/`. |
+| None of these found | Skills in `~/.agents/skills/`. |
+
+To choose instead, pass options after `bash -s --`, for example
+`... | bash -s -- --agent codex --project .`:
+
+- `--agent claude,codex,cursor,gemini,agents` picks the agents;
+- `--project <repo>` installs into one repository instead of your home directory;
+- `--dir <skills directory>` installs for any other agent.
+
+In Claude Code you can also install from inside a session:
+`/plugin marketplace add AmeyaKasture/meko-review-loop`, then
+`/plugin install review-loop@meko-review-loop`.
 
 ### 2. Run the setup skill
 
@@ -110,7 +121,7 @@ The pieces that depend on the agent:
 
 | | Claude Code | Codex, Cursor, Gemini CLI, others |
 |---|---|---|
-| Skills | Plugin, namespaced (`/review-loop:…`) | Copied by `install.sh` (`review-loop-…`) |
+| Skills | Plugin, namespaced (`/review-loop:…`) | Installed by `install.sh` (`review-loop-…`) |
 | Reviewers | `fresh-reviewer` subagents (no edit or MCP tools), or any CLI below | The agent's own read-only subagents, or any CLI below |
 | Gate and verifier | Any CLI below | Any CLI below |
 | Author guide at session start | SessionStart hook, automatic | `rl.py learnings-context --text`, or the agent's own startup hook |
@@ -272,7 +283,7 @@ until `~/.review-loop/` exists. `REVIEW_LOOP_HOME` overrides both.
 
 | Path | What it is |
 |---|---|
-| `install.sh` | Installs for Claude Code (plugin) or copies the skills for any other agent. |
+| `install.sh` | One-line installer: the Claude Code plugin, or the skills for any other agent. Downloads only the plugin when piped from `curl`. |
 | `plugins/review-loop/skills/review-loop/` | The loop protocol, the `rl.py` state engine, the headless reviewer runner, the Meko store, brief, schema, rubric. |
 | `plugins/review-loop/skills/setup/` | Survey a repository, add missing tooling, set up Meko, and write the settings and review skill. |
 | `plugins/review-loop/skills/respond/` | Answer PR comments after a push. |
@@ -294,7 +305,3 @@ bash tests/test_meko_live.sh
 claude plugin validate --strict .
 claude plugin validate --strict plugins/review-loop
 ```
-
-## License
-
-Apache-2.0.
