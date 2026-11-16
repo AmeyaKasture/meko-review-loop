@@ -38,6 +38,10 @@ ctx="$(echo "{\"cwd\":\"$R\"}" | "$RL" learnings-context)"
 expect "hook serves the newest version with no local file" "$ctx" "v2: return errors"
 expect "local copy refreshed from Meko" "$(cat "$REVIEW_LOOP_HOME/guides/rl-live__t$$.md")" "v2:"
 
+echo "endpoint discovery"
+expect "finds the agent API without MEKO_URL" "$(env -u MEKO_URL python3 "$MS" check)" "ok: Meko is running at http://127.0.0.1:"
+expect "MEKO_URL overrides discovery" "$(MEKO_URL=http://127.0.0.1:9 python3 "$MS" check 2>&1 || true)" "http://127.0.0.1:9/api/v1"
+
 echo "fallback when Meko is down"
 ctx="$(echo "{\"cwd\":\"$R\"}" | MEKO_URL=http://127.0.0.1:9 REVIEW_LOOP_GUIDE_STORE=auto "$RL" learnings-context)"
 expect "local copy still served" "$ctx" "v2: return errors"

@@ -14,11 +14,15 @@ usage: meko_store.py check | pull | push
   pull   print the newest guide for $RL_REPO_SLUG (nothing if there is none yet)
   push   save $RL_GUIDE_FILE (and $RL_HISTORY_FILE, if set) for $RL_REPO_SLUG; print the version
 Exits non-zero when Meko is unreachable, so rl.py falls back to its local copy.
-Env: MEKO_URL (default http://127.0.0.1:7778), MEKO_TOKEN (default: `meko token`).
+Env: MEKO_URL, MEKO_TOKEN (default: `meko token`).
+Without MEKO_URL the agent endpoint is discovered: the "Agents (MCP, API)" line of `meko status`,
+then ports 7778 and 7777 on 127.0.0.1, whichever answers Meko's API with the token. Installs differ
+(the web UI and the agent API can share one port or use two), so never hard-code it.
 """
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -26,7 +30,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-MEKO_URL = os.environ.get("MEKO_URL", "http://127.0.0.1:7778")
+MEKO_URL = os.environ.get("MEKO_URL", "").rstrip("/")
+CANDIDATE_PORTS = (7778, 7777)
 GUIDE_ARTIFACT = "author-guide.md"
 AGENT = "review-loop"
 
@@ -52,11 +57,52 @@ def token():
     return r.stdout.strip()
 
 
+def status_url():
+    """The agent endpoint `meko status` reports, e.g. "Agents (MCP, API)   http://127.0.0.1:7778/mcp"."""
+    exe = meko_exe()
+    if not exe:
+        return ""
+    try:
+        out = subprocess.run([exe, "status"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    for line in out.splitlines():
+        if "agent" in line.lower():
+            m = re.search(r"(https?://[^\s/]+)", line)
+            if m:
+                return m.group(1)
+    return ""
+
+
+def answers(url, tok):
+    req = urllib.request.Request(url + "/api/v1/datapacks", headers={"Authorization": "Bearer " + tok})
+    try:
+        return "data" in json.loads(urllib.request.urlopen(req, timeout=3).read())
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
+def base_url(tok):
+    """MEKO_URL if set, else the first candidate that serves Meko's API with this token."""
+    global MEKO_URL
+    if MEKO_URL:
+        return MEKO_URL
+    tried = []
+    for url in [status_url()] + [f"http://127.0.0.1:{p}" for p in CANDIDATE_PORTS]:
+        if url and url not in tried:
+            tried.append(url)
+            if answers(url, tok):
+                MEKO_URL = url
+                return url
+    raise MekoError("Meko's agent API did not answer at " + ", ".join(tried) +
+                    "; is Meko running? Set MEKO_URL if it listens elsewhere.")
+
+
 def call(tok, name, args, timeout=20):
     """One MCP tools/call on Meko's local endpoint."""
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                        "params": {"name": name, "arguments": args}}).encode()
-    req = urllib.request.Request(MEKO_URL + "/mcp", data=body, headers={
+    req = urllib.request.Request(base_url(tok) + "/mcp", data=body, headers={
         "Authorization": "Bearer " + tok, "Content-Type": "application/json",
         "Accept": "application/json, text/event-stream"})
     try:
@@ -76,11 +122,12 @@ def call(tok, name, args, timeout=20):
 
 
 def rest(tok, path, timeout=5):
-    req = urllib.request.Request(MEKO_URL + "/api/v1" + path, headers={"Authorization": "Bearer " + tok})
+    url = base_url(tok)
+    req = urllib.request.Request(url + "/api/v1" + path, headers={"Authorization": "Bearer " + tok})
     try:
         return json.loads(urllib.request.urlopen(req, timeout=timeout).read())["data"]
     except (urllib.error.URLError, OSError, ValueError, KeyError) as e:
-        raise MekoError(f"GET {path}: {e}")
+        raise MekoError(f"GET {url}/api/v1{path}: {e}")
 
 
 def datapack_name(slug):
@@ -131,8 +178,9 @@ def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     try:
         if cmd == "check":
-            rest(token(), "/datapacks")
-            print(f"ok: Meko is running at {MEKO_URL}")
+            tok = token()
+            rest(tok, "/datapacks")
+            print(f"ok: Meko is running at {base_url(tok)}")
         elif cmd == "pull":
             sys.stdout.write(pull(token(), os.environ["RL_REPO_SLUG"]))
         elif cmd == "push":

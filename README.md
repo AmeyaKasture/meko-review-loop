@@ -181,7 +181,10 @@ then in `~/.review-loop/settings.json`:
 
 `auto` falls back to the local copy whenever Meko is down, and says so;
 `command` makes a failed save an error. `meko_store.py check` tells you
-whether Meko is reachable.
+whether Meko is reachable and at which URL. The store finds Meko's agent
+endpoint itself (from `meko status`, then ports 7778 and 7777), since
+installs differ; set `MEKO_URL` only if Meko listens somewhere else. If
+the guide stops saving to Meko, run `check` first.
 
 ## Settings
 

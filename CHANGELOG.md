@@ -1,6 +1,13 @@
 # Changelog
 
 
+## 0.4.2
+
+- The Meko guide store finds Meko's agent endpoint instead of assuming port
+  7778: `MEKO_URL` if set, else the URL `meko status` reports, else ports 7778
+  and 7777, whichever serves the API with the token. `meko_store.py check`
+  prints the URL in use, and errors name it.
+
 ## 0.4.1
 
 - One-line install with no clone: `curl -fsSL

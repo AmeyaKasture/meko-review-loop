@@ -184,6 +184,10 @@ file, which works fine for one agent on one machine.
    ```
    `auto` falls back to the local copy whenever Meko is down. Use
    `"command"` instead if the user wants a failed save to be an error.
+   Do not put a port or `MEKO_URL` in these commands: `meko_store.py`
+   finds Meko's agent endpoint itself (from `meko status`, then ports 7778
+   and 7777), and `check` prints the URL it found. Only if Meko listens
+   somewhere else, prefix both commands with `MEKO_URL=http://127.0.0.1:<port>`.
 6. `rl.py guide-pull` must succeed: `source` is `store` (a guide exists),
    or `none` with no error note (Meko has no guide for this repository yet).
 
